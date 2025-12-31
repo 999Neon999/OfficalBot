@@ -3,7 +3,10 @@
 # Navigate to the bot directory
 cd ~/TradingBot
 
-echo "Starting Trading System..."
+# Activate virtual environment
+if [ -d "venv" ]; then
+    source venv/bin/activate
+fi
 
 # 1. Start Support Services
 echo "Launching Dashboard and Tunnel..."
