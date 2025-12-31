@@ -9,6 +9,7 @@ import pyotp
 import urllib.parse
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -106,7 +107,15 @@ def auto_kite_login():
     chrome_options.add_argument("--disable-dev-shm-usage")
 
     try:
-        driver = webdriver.Chrome(options=chrome_options)
+        # Check common Pi Chromedriver paths
+        pi_driver_path = "/usr/bin/chromedriver"
+        if os.path.exists(pi_driver_path):
+            service = Service(executable_path=pi_driver_path)
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+        else:
+            # Fallback for Windows/Other
+            driver = webdriver.Chrome(options=chrome_options)
+        
         driver.get(login_url)
         wait = WebDriverWait(driver, 20)
         
