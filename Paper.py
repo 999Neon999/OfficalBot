@@ -43,8 +43,8 @@ STOCK_META = {
     "TITAN": {"Beta": 1.4, "Sector": "Jewellery"},
     "TMPV": {"Beta": 1.9, "Sector": "Tech"},
     "PAYTM": {"Beta": 2.0, "Sector": "Fintech"},
-    "NYKAA": {"Beta": 1.8, "Retail": "Retail"},
-    "DELHIVERY": {"Beta": 1.7, "Logistics": "Logistics"},
+    "NYKAA": {"Beta": 1.8, "Sector": "Retail"},
+    "DELHIVERY": {"Beta": 1.7, "Sector": "Logistics"},
     "RVNL": {"Beta": 2.2, "Sector": "Railway"},
     "IRFC": {"Beta": 1.9, "Sector": "Railway Finance"},
     "HUDCO": {"Beta": 1.7, "Sector": "Housing Finance"},
@@ -52,8 +52,8 @@ STOCK_META = {
     "DIXON": {"Beta": 1.8, "Sector": "Electronics"},
     "SAIL": {"Beta": 1.8, "Sector": "Metals"},
     "JINDALSTEL": {"Beta": 1.9, "Sector": "Metals"},
-    "NMDC": {"Beta": 1.6, "Mining": "Mining"},
-    "COALINDIA": {"Beta": 1.5, "Mining": "Mining"},
+    "NMDC": {"Beta": 1.6, "Sector": "Mining"},
+    "COALINDIA": {"Beta": 1.5, "Sector": "Mining"},
     "ONGC": {"Beta": 1.5, "Sector": "Energy"},
     "GAIL": {"Beta": 1.5, "Sector": "Gas"},
     "POWERGRID": {"Beta": 1.4, "Sector": "Power"},
@@ -64,12 +64,12 @@ STOCK_META = {
     "TCS": {"Beta": 1.2, "Sector": "IT"},
     "WIPRO": {"Beta": 1.3, "Sector": "IT"},
     "HCLTECH": {"Beta": 1.3, "Sector": "IT"},
-    "SUNPHARMA": {"Beta": 1.4, "Pharma": "Pharma"},
+    "SUNPHARMA": {"Beta": 1.4, "Sector": "Pharma"},
     "ETERNAL": {"Beta": 1.8, "Sector": "Auto"}
 }
 
 STOCKS = [f"{key}.NS" if not key.endswith('.NS') else key for key in STOCK_META.keys()]
-UNIQUE_SECTORS = sorted(list(set([v.get('Sector', 'Other') for v in STOCK_META.values()])))
+UNIQUE_SECTORS = ['Auto', 'Banking', 'Cables', 'Cement', 'Conglomerate', 'Diversified', 'Electronics', 'Energy', 'Finance', 'Fintech', 'Gas', 'Housing Finance', 'IT', 'Infra', 'Jewellery', 'Logistics', 'Metals', 'Mining', 'Pharma', 'Power', 'Railway', 'Railway Finance', 'Retail', 'Tech', 'Telecom']
 
 # Market Settings (India)
 MARKET_OPEN = "09:15:00"
@@ -79,7 +79,7 @@ CHECK_INTERVAL_HOLD = 10  # 10s Position Monitoring
 TIMEZONE = "Asia/Kolkata"
 TOTAL_INITIAL_CAPITAL = 11700  # User Request: ₹11,700 capital
 
-AI_THRESHOLD = 0.75
+AI_THRESHOLD = 0.70
 BASE_TARGET_PCT = 0.0070   # Optimized Apex V11
 STOP_LOSS_PCT = 2.0        # Optimized Apex V11
 TRAILING_EFFICIENCY = 0.90 # Optimized Apex V11
@@ -289,9 +289,8 @@ def get_ai_prediction(df):
         latest_data = df.iloc[-1:].copy()
         for f in features:
             if f not in latest_data.columns: latest_data[f] = 0.0
-        X = latest_data[features].values
-        # CatBoost predict_proba returns [prob_0, prob_1]
-        probs = model.predict_proba(X)
+        # Passing DataFrame directly to ensure feature name mapping
+        probs = model.predict_proba(latest_data[features])
         return float(probs[0][1])
     except Exception as e:
         print(f"Prediction Error: {e}")

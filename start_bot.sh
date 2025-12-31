@@ -24,15 +24,7 @@ while true; do
     # Only run on weekdays (Mon-Fri)
     if [ "$DAY" -le 5 ]; then
         
-        # 1. Morning Login (7:00 AM)
-        if [ "$CURRENT_TIME" == "07:00" ]; then
-            echo "07:00 AM: Running kite_login.py..."
-            # Note: Ensure Selenium is setup for headless mode on Pi
-            python3 kite_login.py > login.log 2>&1
-            sleep 65 # Prevent double execution
-        fi
-
-        # 2. Market Start & Watchdog (09:15 AM - 03:30 PM)
+        # 1. Market Start & Watchdog (09:15 AM - 03:30 PM)
         if [[ "$CURRENT_TIME" > "09:14" && "$CURRENT_TIME" < "15:30" ]]; then
             if ! pgrep -f "Live_Trader_Kite.py" > /dev/null; then
                 echo "$CURRENT_TIME: [WATCHDOG] Live Trader not running. Starting/Restarting..."

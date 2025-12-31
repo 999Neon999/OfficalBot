@@ -5,17 +5,29 @@ import numpy as np
 from catboost import CatBoostClassifier
 from datetime import datetime
 import pytz
+import pyotp
+import urllib.parse
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from kiteconnect import KiteConnect
 import warnings
 from logger import logger
 
 warnings.filterwarnings("ignore")
 
-# ================== CONFIGURATION ==================
+# ================== CREDENTIALS & API CONFIG ==================
+USER_ID = "THS720"
+PASSWORD = "Chits@23"
+TOTP_SECRET = "E5HRMPZEN4QOOORKIPR5UX66E5SAG4VY"
+
 API_KEY = "vv25p1x1xjh0gpnr"
+API_SECRET = "2mj8gklqv9hjf51a3vuf31mm4xgety5f"
 TOKEN_FILE = "access_token.txt"
 MODEL_PATH = "recovered_model.cbm"
-AI_THRESHOLD = 0.75
+AI_THRESHOLD = 0.70
 
 # Strategy Parameters (V13 Supreme Apex)
 BASE_TARGET_PCT = 0.0070
@@ -78,27 +90,90 @@ STOCK_META = {
     "SUNPHARMA": {"Beta": 1.4, "Sector": "Pharma"}
 }
 
-UNIQUE_SECTORS = sorted(list(set([v.get('Sector', 'Other') for v in STOCK_META.values()])))
+UNIQUE_SECTORS = ['Auto', 'Banking', 'Cables', 'Cement', 'Conglomerate', 'Diversified', 'Electronics', 'Energy', 'Finance', 'Fintech', 'Gas', 'Housing Finance', 'IT', 'Infra', 'Jewellery', 'Logistics', 'Metals', 'Mining', 'Pharma', 'Power', 'Railway', 'Railway Finance', 'Retail', 'Tech', 'Telecom']
 
 # ================== INITIALIZATION ==================
 
-if not os.path.exists(TOKEN_FILE):
-    print(f"FATAL: {TOKEN_FILE} not found. Run kite_login.py first.")
-    exit(1)
+def auto_kite_login():
+    """Automated login via Selenium to get a fresh access token."""
+    print("Attempting Automated Kite Login (Headless)...")
+    kite_api = KiteConnect(api_key=API_KEY)
+    login_url = kite_api.login_url()
+    
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
 
-with open(TOKEN_FILE, "r") as f:
-    ACCESS_TOKEN = f.read().strip()
+    try:
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.get(login_url)
+        wait = WebDriverWait(driver, 20)
+        
+        # Enter User ID
+        wait.until(EC.presence_of_element_located((By.ID, "userid"))).send_keys(USER_ID)
+        driver.find_element(By.ID, "password").send_keys(PASSWORD)
+        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+        
+        # Handle TOTP
+        clean_secret = TOTP_SECRET.replace(" ", "")
+        totp = pyotp.TOTP(clean_secret)
+        otp_code = totp.now()
+        
+        pin_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='number'], input[label='TOTP']")))
+        pin_input.send_keys(otp_code)
+        
+        time.sleep(5)
+        
+        if "request_token=" in driver.current_url:
+            parsed_url = urllib.parse.urlparse(driver.current_url)
+            request_token = urllib.parse.parse_qs(parsed_url.query)['request_token'][0]
+            session = kite_api.generate_session(request_token, api_secret=API_SECRET)
+            access_token = session["access_token"]
+            
+            with open(TOKEN_FILE, "w") as f:
+                f.write(access_token)
+            print(f"SUCCESS: New Access Token saved to {TOKEN_FILE}")
+            driver.quit()
+            return access_token
+        else:
+            print("FAILED: Redirect URL not found.")
+            driver.quit()
+            return None
+    except Exception as e:
+        print(f"FAILED: Auto-login error: {e}")
+        return None
 
-kite = KiteConnect(api_key=API_KEY)
-kite.set_access_token(ACCESS_TOKEN)
+def initialize_kite():
+    """Initialize KiteConnect and handle token acquisition."""
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE, "r") as f:
+            token = f.read().strip()
+    else:
+        token = auto_kite_login()
 
-try:
-    print("Connecting to Kite...")
-    profile = kite.profile()
-    print(f"OK: Logged in as {profile['user_name']} ({profile['user_id']})")
-except Exception as e:
-    print(f"FATAL: Kite Login Failed: {e}")
-    exit(1)
+    if not token:
+        print("FATAL: Could not acquire access token.")
+        exit(1)
+
+    k = KiteConnect(api_key=API_KEY)
+    k.set_access_token(token)
+
+    try:
+        profile = k.profile()
+        print(f"OK: Logged in as {profile['user_name']}")
+        return k
+    except Exception:
+        print("Token expired or invalid. Attempting fresh login...")
+        new_token = auto_kite_login()
+        if new_token:
+            k.set_access_token(new_token)
+            return k
+        else:
+            print("FATAL: Re-login failed.")
+            exit(1)
+
+kite = initialize_kite()
 
 print(f"Loading AI Model: {MODEL_PATH}...")
 try:
@@ -238,10 +313,12 @@ def get_ai_prediction(df):
         latest_data = df.iloc[-1:].copy()
         for f in features:
             if f not in latest_data.columns: latest_data[f] = 0.0
-        X = latest_data[features].values
-        probs = model.predict_proba(X)
+        # Passing DataFrame directly to ensure feature name mapping
+        probs = model.predict_proba(latest_data[features])
         return float(probs[0][1])
-    except: return 0.0
+    except Exception as e:
+        print(f"Prediction Error: {e}")
+        return 0.0
 
 active_pos = None
 
@@ -352,7 +429,7 @@ def scan_and_trade():
 
 if __name__ == "__main__":
     print("\n☢️  LIVE TRADER KITE V13 SUPREME ACTIVE")
-    print("Concentration: One stock at a time | Threshold: 0.75\n")
+    print("Concentration: One stock at a time | Threshold: 0.70\n")
     while True:
         try:
             scan_and_trade()
