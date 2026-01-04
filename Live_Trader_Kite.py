@@ -28,14 +28,15 @@ API_KEY = "vv25p1x1xjh0gpnr"
 API_SECRET = "2mj8gklqv9hjf51a3vuf31mm4xgety5f"
 TOKEN_FILE = "access_token.txt"
 MODEL_PATH = "recovered_model.cbm"
-AI_THRESHOLD = 0.70
+AI_THRESHOLD = 0.50
 
-# Strategy Parameters (V13 Supreme Apex)
+# Strategy Parameters (V14 Supreme)
 BASE_TARGET_PCT = 0.0070
 STOP_LOSS_PCT = 2.0        # 2% fixed SL
 TRAILING_EFFICIENCY = 0.90 
 SQUEEZE_THRESH = 0.00080    # Momentum stall trigger
 SQUEEZE_WIDTH_PCT = 0.0005  # Tight 0.05% trail on stall
+MAX_HOLD_MINUTES = 15       # V14 Time Exit
 
 TIMEZONE = "Asia/Kolkata"
 CHECK_INTERVAL_LIVE = 15    # Seconds between scans
@@ -262,7 +263,7 @@ class LivePosition:
         self.status = "OPEN"
         self.peak_price = entry_price
         self.is_squeezed = False
-        self.p_6_ref = None # Price after 6 mins of entry for velocity check
+        self.p_5_ref = None # Price after 5 mins of entry for velocity check
         self.entry_time = datetime.now(pytz.timezone(TIMEZONE))
 
 def add_features(df, stock_symbol):
@@ -346,17 +347,18 @@ def scan_and_trade():
             active_pos.peak_price = max(active_pos.peak_price, curr_p)
             elapsed = (datetime.now(pytz.timezone(TIMEZONE)) - active_pos.entry_time).total_seconds() / 60.0
             
-            # Record price at 6 mins for velocity check
-            if 5.5 < elapsed < 7.0 and active_pos.p_6_ref is None:
-                active_pos.p_6_ref = curr_p
-                print(f"Recorded 6-min Reference: ₹{curr_p}")
+            # Record price at 5 mins for velocity check
+            if 4.5 < elapsed < 5.5 and active_pos.p_5_ref is None:
+                active_pos.p_5_ref = curr_p
+                print(f"Recorded 5-min Reference: ₹{curr_p}")
 
             exit_reason = None
             if curr_p <= active_pos.stop_loss: exit_reason = "STOP LOSS"
+            elif elapsed >= MAX_HOLD_MINUTES: exit_reason = "TIME EXIT"
             elif curr_p >= active_pos.target_price:
                 # Target Hit -> Squeeze Logic
-                if active_pos.p_6_ref:
-                    velocity = (active_pos.p_6_ref - active_pos.entry_price) / active_pos.entry_price
+                if active_pos.p_5_ref:
+                    velocity = (active_pos.p_5_ref - active_pos.entry_price) / active_pos.entry_price
                     if velocity < SQUEEZE_THRESH:
                         # Stall detected
                         new_sl = active_pos.peak_price * (1 - SQUEEZE_WIDTH_PCT)
@@ -369,7 +371,7 @@ def scan_and_trade():
                         trail_sl = active_pos.peak_price * (1 - 0.003)
                         if curr_p <= trail_sl: exit_reason = "TRAILING STOP"
                 else:
-                    # Before 6 mins, use standard target profit
+                    # Before 5 mins, use standard target profit
                     exit_reason = "TARGET HIT"
 
             if exit_reason:
@@ -437,8 +439,8 @@ def scan_and_trade():
                 print(f"ENTRY FAILED for {ticker_raw}. Skipping.")
 
 if __name__ == "__main__":
-    print("\n☢️  LIVE TRADER KITE V13 SUPREME ACTIVE")
-    print("Concentration: One stock at a time | Threshold: 0.70\n")
+    print("\n☢️  LIVE TRADER KITE V14 SUPREME ACTIVE")
+    print(f"Concentration: One stock at a time | Threshold: {AI_THRESHOLD}\n")
     while True:
         try:
             scan_and_trade()
@@ -448,4 +450,3 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Loop Error: {e}")
         time.sleep(CHECK_INTERVAL_LIVE)
-
