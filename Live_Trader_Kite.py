@@ -27,21 +27,26 @@ TOTP_SECRET = "E5HRMPZEN4QOOORKIPR5UX66E5SAG4VY"
 API_KEY = "vv25p1x1xjh0gpnr"
 API_SECRET = "2mj8gklqv9hjf51a3vuf31mm4xgety5f"
 TOKEN_FILE = "access_token.txt"
-MODEL_PATH = "recovered_model.cbm"
-AI_THRESHOLD = 0.50
-
-# Strategy Parameters (Aligned to V14 Supreme)
-BASE_TARGET_PCT = 0.0070
+# Strategy Parameters (V17 ALPHA HUNTER - GIGA MODE)
+BASE_TARGET_PCT = 0.0200    # V17 Aggressive Target (2.0%)
 STOP_LOSS_PCT = 2.0        
 TRAILING_EFFICIENCY = 0.90 
 SQUEEZE_THRESH = 0.00080    
 SQUEEZE_WIDTH_PCT = 0.0005  
 MAX_HOLD_BARS = 15
-MAX_HOLD_MINUTES = 225
+MAX_HOLD_MINUTES = 15       # Fast Cycle Retention
+AI_THRESHOLD = 0.65         # V17 Alpha Threshold
+MAX_CONCURRENT_TRADES = 20  # V17 Density Slots
 
 TIMEZONE = "Asia/Kolkata"
-CHECK_INTERVAL_LIVE = 30    # Scans every 30s
-MAX_CONCURRENT_TRADES = 10  # Allow multiple trades to hit the 21/day goal
+CHECK_INTERVAL_LIVE = 15    
+MAX_DAILY_LOSS = -2000      # Circuit breaker: Stop if down ₹2000
+TRADE_LOG_FILE = "v17_trade_log.csv"
+
+# Session State
+SESSION_PNL = 0.0
+IS_Halt = False
+
 
 STOCK_META = {
     "TATASTEEL": {"Beta": 1.8, "Sector": "Metals"},
@@ -206,6 +211,14 @@ features = base_features + ['beta'] + surgical_features + [f'sector_{sec}' for s
 
 # ================== ROBUST API HELPERS ==================
 
+def log_v17_trade(data):
+    """Save trade to persistent CSV file."""
+    df = pd.DataFrame([data])
+    if not os.path.exists(TRADE_LOG_FILE):
+        df.to_csv(TRADE_LOG_FILE, index=False)
+    else:
+        df.to_csv(TRADE_LOG_FILE, mode='a', header=False, index=False)
+
 def safe_kite_call(func, *args, **kwargs):
     """Wrapper for general Kite API calls with simple retry."""
     max_retries = 3
@@ -335,9 +348,11 @@ def get_ai_prediction(df):
 active_positions = {}
 
 def scan_and_trade():
-    global active_positions
+    global active_positions, SESSION_PNL, IS_Halt
     import yfinance as yf
     
+    if IS_Halt: return
+
     # 1. Manage Existing Positions
     now = datetime.now(pytz.timezone(TIMEZONE))
     for ticker in list(active_positions.keys()):
@@ -346,32 +361,51 @@ def scan_and_trade():
             df = yf.download(ticker + ".NS", period="1d", interval="1m", progress=False, auto_adjust=True)
             if df.empty: continue
             
-            curr_p = df['Close'].iloc[-1]
+            curr_p = float(df['Close'].iloc[-1])
             pos.peak_price = max(pos.peak_price, curr_p)
             elapsed = (now - pos.entry_time).total_seconds() / 60.0
             
+            # Squeeze logic
+            if 5.5 < elapsed < 7.5 and pos.p_5_ref is None:
+                pos.p_5_ref = curr_p
+                v_6 = (curr_p - pos.entry_price) / pos.entry_price
+                if v_6 < SQUEEZE_THRESH:
+                    new_sl = pos.peak_price * (1 - SQUEEZE_WIDTH_PCT)
+                    if not pos.is_squeezed:
+                        print(f"⚠️  SQUEEZE: {ticker} stalled. SL -> {new_sl:.2f}")
+                        pos.is_squeezed = True
+                        pos.stop_loss = new_sl
+
             exit_reason = None
-            if now.hour == 15 and now.minute >= 15: exit_reason = "EOD SQUARE OFF"
-            elif curr_p <= pos.stop_loss: exit_reason = "STOP LOSS"
-            elif elapsed >= MAX_HOLD_MINUTES: exit_reason = "TIME EXIT"
-            elif curr_p >= pos.target_price: exit_reason = "TARGET HIT"
+            if now.hour == 15 and now.minute >= 15: exit_reason = "EOD"
+            elif curr_p <= pos.stop_loss: exit_reason = "SL/SQZ"
+            elif elapsed >= MAX_HOLD_MINUTES: exit_reason = "TIME"
+            elif curr_p >= pos.target_price: exit_reason = "TGT"
 
             if exit_reason:
-                print(f"EXECUTING {exit_reason} for {ticker} at ₹{curr_p}")
                 order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_SELL, ticker=ticker, quantity=pos.quantity)
                 if order_id:
-                    logger.log_trade("sell", ticker, curr_p, pos.quantity, pnl=(curr_p - pos.entry_price)*pos.quantity, reason=exit_reason)
+                    pnl = (curr_p - pos.entry_price) * pos.quantity
+                    SESSION_PNL += pnl
+                    log_v17_trade({
+                        "time": now, "ticker": ticker, "side": "SELL", "price": curr_p, 
+                        "qty": pos.quantity, "pnl": pnl, "reason": exit_reason
+                    })
+                    print(f"✅ EXIT: {ticker} | {exit_reason} | PnL: ₹{pnl:.2f}")
                     del active_positions[ticker]
+                    
+                    if SESSION_PNL <= MAX_DAILY_LOSS:
+                        print(f"🛑 CIRCUIT BREAKER TRIPPED! Session PnL: ₹{SESSION_PNL:.2f}")
+                        IS_Halt = True
         except Exception as e: print(f"Error managing {ticker}: {e}")
 
     # 2. Scanning for New Entries
     if len(active_positions) >= MAX_CONCURRENT_TRADES: return
     if now.hour == 15 and now.minute >= 10: return
 
-    print(f"Scanning ({len(active_positions)} active)...")
     tickers = [t + ".NS" for t in STOCK_META.keys()]
     try:
-        data = yf.download(tickers, period="7d", interval="1m", group_by='ticker', progress=False, auto_adjust=True)
+        data = yf.download(tickers, period="3d", interval="1m", group_by='ticker', progress=False, auto_adjust=True)
     except: return
 
     for sym in tickers:
@@ -380,43 +414,54 @@ def scan_and_trade():
         
         try:
             df = data[sym].dropna().copy()
-            if len(df) < 100: continue
+            if len(df) < 50: continue
             
-            # Resample to 15m for AI features
+            # Resample for AI features (15m bars)
             df_15m = df.resample('15min', label='left', closed='left', origin='start_day').agg({
                 'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'
             }).dropna()
             
-            if len(df_15m) < 50: continue
+            if len(df_15m) < 20: continue # Need at least some bars
             
             pdf = add_features(df_15m, sym)
             prob = get_ai_prediction(pdf)
             
             if prob >= AI_THRESHOLD:
-                curr_p = df['Close'].iloc[-1]
+                curr_p = float(df['Close'].iloc[-1])
                 beta = pdf['beta'].iloc[-1]
-                qty = int(11700 / curr_p)
+                qty = int(INITIAL_CAPITAL / curr_p)
                 if qty < 1: continue
                 
-                print(f"NUCLEAR SIGNAL! {ticker_raw} | Prob: {prob:.1%} | Price: ₹{curr_p}")
+                print(f"🚀 SIGNAL: {ticker_raw} | Conf: {prob:.1%} | Price: ₹{curr_p}")
                 order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_BUY, ticker=ticker_raw, quantity=qty)
                 if order_id:
                     target = curr_p * (1 + BASE_TARGET_PCT * beta)
                     sl = curr_p * (1 - STOP_LOSS_PCT/100.0)
                     active_positions[ticker_raw] = LivePosition(ticker_raw, curr_p, qty, sl, target, beta)
-                    logger.log_trade("buy", ticker_raw, curr_p, qty, reason=f"Conf: {prob:.1%}")
+                    log_v17_trade({
+                        "time": now, "ticker": ticker_raw, "side": "BUY", "price": curr_p, 
+                        "qty": qty, "pnl": 0.0, "reason": f"Conf: {prob:.1%}"
+                    })
                     if len(active_positions) >= MAX_CONCURRENT_TRADES: break
         except: continue
 
 if __name__ == "__main__":
-    print("\n☢️  LIVE TRADER KITE V14 SUPREME ACTIVE")
-    print(f"Concentration: One stock at a time | Threshold: {AI_THRESHOLD}\n")
+    print("\n" + "="*50)
+    print("☢️  V17 ALPHA HUNTER - GIGA MODE ACTIVE")
+    print(f"Goal: BEYOND OMNIPOTENCE | Thresh: {AI_THRESHOLD} | Slots: {MAX_CONCURRENT_TRADES}")
+    print("="*50 + "\n")
+    
     while True:
         try:
+            now = datetime.now(pytz.timezone(TIMEZONE))
+            # Refresh Dashboard line
+            status = "HALTED" if IS_Halt else "RUNNING"
+            print(f"[{now.strftime('%H:%M:%S')}] {status} | Slots: {len(active_positions)}/{MAX_CONCURRENT_TRADES} | PnL: ₹{SESSION_PNL:.2f}", end="\r")
+            
             scan_and_trade()
         except KeyboardInterrupt:
-            print("\nShutting down...")
+            print("\n👋 Graceful Shutdown Initiated...")
             break
         except Exception as e:
-            print(f"Loop Error: {e}")
+            print(f"\n⚠️  Loop Error: {e}")
         time.sleep(CHECK_INTERVAL_LIVE)
