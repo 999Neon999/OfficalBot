@@ -30,16 +30,18 @@ TOKEN_FILE = "access_token.txt"
 MODEL_PATH = "recovered_model.cbm"
 AI_THRESHOLD = 0.50
 
-# Strategy Parameters (V14 Supreme)
+# Strategy Parameters (Aligned to V14 Supreme)
 BASE_TARGET_PCT = 0.0070
-STOP_LOSS_PCT = 2.0        # 2% fixed SL
+STOP_LOSS_PCT = 2.0        
 TRAILING_EFFICIENCY = 0.90 
-SQUEEZE_THRESH = 0.00080    # Momentum stall trigger
-SQUEEZE_WIDTH_PCT = 0.0005  # Tight 0.05% trail on stall
-MAX_HOLD_MINUTES = 15       # V14 Time Exit
+SQUEEZE_THRESH = 0.00080    
+SQUEEZE_WIDTH_PCT = 0.0005  
+MAX_HOLD_BARS = 15
+MAX_HOLD_MINUTES = 225
 
 TIMEZONE = "Asia/Kolkata"
-CHECK_INTERVAL_LIVE = 15    # Seconds between scans
+CHECK_INTERVAL_LIVE = 30    # Scans every 30s
+MAX_CONCURRENT_TRADES = 10  # Allow multiple trades to hit the 21/day goal
 
 STOCK_META = {
     "TATASTEEL": {"Beta": 1.8, "Sector": "Metals"},
@@ -330,113 +332,81 @@ def get_ai_prediction(df):
         print(f"Prediction Error: {e}")
         return 0.0
 
-active_pos = None
+active_positions = {}
 
 def scan_and_trade():
-    global active_pos
-    import yfinance as yf # Keep scanner simple using yfinance for data, but Kite for orders
+    global active_positions
+    import yfinance as yf
     
-    if active_pos:
-        # Manage Exit logic
+    # 1. Manage Existing Positions
+    now = datetime.now(pytz.timezone(TIMEZONE))
+    for ticker in list(active_positions.keys()):
+        pos = active_positions[ticker]
         try:
-            ticker = active_pos.ticker + ".NS"
-            df = yf.download(ticker, period="1d", interval="1m", progress=False)
-            if df.empty: return
+            df = yf.download(ticker + ".NS", period="1d", interval="1m", progress=False, auto_adjust=True)
+            if df.empty: continue
             
             curr_p = df['Close'].iloc[-1]
-            active_pos.peak_price = max(active_pos.peak_price, curr_p)
-            elapsed = (datetime.now(pytz.timezone(TIMEZONE)) - active_pos.entry_time).total_seconds() / 60.0
+            pos.peak_price = max(pos.peak_price, curr_p)
+            elapsed = (now - pos.entry_time).total_seconds() / 60.0
             
-            # Record price at 5 mins for velocity check
-            if 4.5 < elapsed < 5.5 and active_pos.p_5_ref is None:
-                active_pos.p_5_ref = curr_p
-                print(f"Recorded 5-min Reference: ₹{curr_p}")
-
             exit_reason = None
-            if curr_p <= active_pos.stop_loss: exit_reason = "STOP LOSS"
+            if now.hour == 15 and now.minute >= 15: exit_reason = "EOD SQUARE OFF"
+            elif curr_p <= pos.stop_loss: exit_reason = "STOP LOSS"
             elif elapsed >= MAX_HOLD_MINUTES: exit_reason = "TIME EXIT"
-            elif curr_p >= active_pos.target_price:
-                # Target Hit -> Squeeze Logic
-                if active_pos.p_5_ref:
-                    velocity = (active_pos.p_5_ref - active_pos.entry_price) / active_pos.entry_price
-                    if velocity < SQUEEZE_THRESH:
-                        # Stall detected
-                        new_sl = active_pos.peak_price * (1 - SQUEEZE_WIDTH_PCT)
-                        if not active_pos.is_squeezed:
-                            print(f"Momentum Stall! Squeezing SL to ₹{new_sl:.2f}")
-                            active_pos.is_squeezed = True
-                        if curr_p <= new_sl: exit_reason = "SQUEEZE EXIT"
-                    else:
-                        # Healthy Trend
-                        trail_sl = active_pos.peak_price * (1 - 0.003)
-                        if curr_p <= trail_sl: exit_reason = "TRAILING STOP"
-                else:
-                    # Before 5 mins, use standard target profit
-                    exit_reason = "TARGET HIT"
+            elif curr_p >= pos.target_price: exit_reason = "TARGET HIT"
 
             if exit_reason:
-                print(f"EXECUTING {exit_reason} for {active_pos.ticker} at ₹{curr_p}")
-                order_id = place_order_with_retry(
-                    side=kite.TRANSACTION_TYPE_SELL,
-                    ticker=active_pos.ticker,
-                    quantity=active_pos.quantity
-                )
+                print(f"EXECUTING {exit_reason} for {ticker} at ₹{curr_p}")
+                order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_SELL, ticker=ticker, quantity=pos.quantity)
                 if order_id:
-                    # Log Sell
-                    entry_p = active_pos.entry_price
-                    qty = active_pos.quantity
-                    pnl = (curr_p - entry_p) * qty
-                    logger.log_trade("sell", active_pos.ticker, curr_p, qty, pnl=pnl, reason=exit_reason)
-                    active_pos = None
-                else:
-                    print("CRITICAL: EXIT ORDER FAILED. WILL RETRY IN NEXT SCAN.")
-        except Exception as e:
-            print(f"Position Management Error: {e}")
-        return
+                    logger.log_trade("sell", ticker, curr_p, pos.quantity, pnl=(curr_p - pos.entry_price)*pos.quantity, reason=exit_reason)
+                    del active_positions[ticker]
+        except Exception as e: print(f"Error managing {ticker}: {e}")
 
-    # Scan for Entries
-    print("Scanning stocks for entries...")
+    # 2. Scanning for New Entries
+    if len(active_positions) >= MAX_CONCURRENT_TRADES: return
+    if now.hour == 15 and now.minute >= 10: return
+
+    print(f"Scanning ({len(active_positions)} active)...")
     tickers = [t + ".NS" for t in STOCK_META.keys()]
     try:
-        data = yf.download(tickers, period="1d", interval="1m", group_by='ticker', progress=False)
+        data = yf.download(tickers, period="7d", interval="1m", group_by='ticker', progress=False, auto_adjust=True)
     except: return
 
     for sym in tickers:
-        df = pd.DataFrame()
-        if sym in data.columns.levels[0]: df = data[sym].copy()
-        elif sym in data: df = data[sym].copy()
+        ticker_raw = sym.replace('.NS', '')
+        if ticker_raw in active_positions: continue
         
-        if df.empty or len(df) < 60: continue
-        
-        pdf = add_features(df, sym)
-        prob = get_ai_prediction(pdf)
-        
-        if prob >= AI_THRESHOLD:
-            ticker_raw = sym.replace('.NS', '')
-            curr_p = pdf['close'].iloc[-1]
-            beta = pdf['beta'].iloc[-1]
+        try:
+            df = data[sym].dropna().copy()
+            if len(df) < 100: continue
             
-            # Simple Capital Math
-            # Assuming ₹11,700 per trade
-            qty = int(11700 / curr_p)
-            if qty < 1: continue
+            # Resample to 15m for AI features
+            df_15m = df.resample('15min', label='left', closed='left', origin='start_day').agg({
+                'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'
+            }).dropna()
             
-            print(f"NUCLEAR SIGNAL! {ticker_raw} | Prob: {prob:.1%} | Price: ₹{curr_p}")
-            order_id = place_order_with_retry(
-                side=kite.TRANSACTION_TYPE_BUY,
-                ticker=ticker_raw,
-                quantity=qty
-            )
+            if len(df_15m) < 50: continue
             
-            if order_id:
-                target = curr_p * (1 + BASE_TARGET_PCT * beta)
-                sl = curr_p * (1 - STOP_LOSS_PCT/100.0)
-                active_pos = LivePosition(ticker_raw, curr_p, qty, sl, target, beta)
-                logger.log_trade("buy", ticker_raw, curr_p, qty, reason=f"Confidence: {prob:.1%}")
-                print(f"Position Tracked: SL: ₹{sl:.2f}, Target: ₹{target:.2f}")
-                break 
-            else:
-                print(f"ENTRY FAILED for {ticker_raw}. Skipping.")
+            pdf = add_features(df_15m, sym)
+            prob = get_ai_prediction(pdf)
+            
+            if prob >= AI_THRESHOLD:
+                curr_p = df['Close'].iloc[-1]
+                beta = pdf['beta'].iloc[-1]
+                qty = int(11700 / curr_p)
+                if qty < 1: continue
+                
+                print(f"NUCLEAR SIGNAL! {ticker_raw} | Prob: {prob:.1%} | Price: ₹{curr_p}")
+                order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_BUY, ticker=ticker_raw, quantity=qty)
+                if order_id:
+                    target = curr_p * (1 + BASE_TARGET_PCT * beta)
+                    sl = curr_p * (1 - STOP_LOSS_PCT/100.0)
+                    active_positions[ticker_raw] = LivePosition(ticker_raw, curr_p, qty, sl, target, beta)
+                    logger.log_trade("buy", ticker_raw, curr_p, qty, reason=f"Conf: {prob:.1%}")
+                    if len(active_positions) >= MAX_CONCURRENT_TRADES: break
+        except: continue
 
 if __name__ == "__main__":
     print("\n☢️  LIVE TRADER KITE V14 SUPREME ACTIVE")
