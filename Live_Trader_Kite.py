@@ -211,6 +211,48 @@ features = base_features + ['beta'] + surgical_features + [f'sector_{sec}' for s
 
 # ================== ROBUST API HELPERS ==================
 
+def calculate_charges(buy_p, sell_p, qty):
+    """Calculate detailed Zerodha-style intraday equity charges."""
+    buy_val = buy_p * qty
+    sell_val = sell_p * qty
+    turnover = buy_val + sell_val
+    
+    # 1. Brokerage: 0.03% or Rs. 20 per order (capped at 20 per leg)
+    buy_brokerage = min(20.0, buy_val * 0.0003)
+    sell_brokerage = min(20.0, sell_val * 0.0003)
+    total_brokerage = buy_brokerage + sell_brokerage
+    
+    # 2. STT: 0.025% on Sell side only for Intraday Equity
+    stt = sell_val * 0.00025
+    
+    # 3. Transaction Charges: ~0.00325% on turnover
+    txn_charge = turnover * 0.0000325
+    
+    # 4. SEBI Charges: 0.0001% on turnover
+    sebi_charge = turnover * 0.000001
+    
+    # 5. GST: 18% on (Brokerage + Txn Charge + SEBI)
+    gst = (total_brokerage + txn_charge + sebi_charge) * 0.18
+    
+    # 6. Stamp Duty: 0.003% on Buy side only
+    stamp_duty = buy_val * 0.00003
+    
+    total_tax = stt + txn_charge + sebi_charge + gst + stamp_duty
+    total_charges = total_brokerage + total_tax
+    
+    breakeven_pts = total_charges / qty
+    
+    return {
+        "brokerage": total_brokerage,
+        "stt": stt,
+        "txn_charge": txn_charge,
+        "sebi": sebi_charge,
+        "gst": gst,
+        "stamp": stamp_duty,
+        "total": total_charges,
+        "breakeven_pts": breakeven_pts
+    }
+
 def log_v17_trade(data):
     """Save trade to persistent CSV file."""
     df = pd.DataFrame([data])
@@ -385,13 +427,18 @@ def scan_and_trade():
             if exit_reason:
                 order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_SELL, ticker=ticker, quantity=pos.quantity)
                 if order_id:
-                    pnl = (curr_p - pos.entry_price) * pos.quantity
+                    # Detailed Charges Calculation
+                    c_info = calculate_charges(pos.entry_price, curr_p, pos.quantity)
+                    pnl = (curr_p - pos.entry_price) * pos.quantity - c_info['total']
                     SESSION_PNL += pnl
+                    
                     log_v17_trade({
                         "time": now, "ticker": ticker, "side": "SELL", "price": curr_p, 
-                        "qty": pos.quantity, "pnl": pnl, "reason": exit_reason
+                        "qty": pos.quantity, "pnl": pnl, 
+                        "charges": c_info['total'], "stt": c_info['stt'], "gst": c_info['gst'],
+                        "breakeven": c_info['breakeven_pts'], "reason": exit_reason
                     })
-                    print(f"✅ EXIT: {ticker} | {exit_reason} | PnL: ₹{pnl:.2f}")
+                    print(f"✅ EXIT: {ticker} | {exit_reason} | Net PnL: ₹{pnl:.2f} (Tax: ₹{c_info['total']:.2f})")
                     del active_positions[ticker]
                     
                     if SESSION_PNL <= MAX_DAILY_LOSS:
