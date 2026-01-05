@@ -45,5 +45,19 @@ def get_stats():
             
     return jsonify(stats)
 
+@app.route("/api/logs")
+def get_logs():
+    csv_file = "v17_trade_log.csv"
+    if not os.path.exists(csv_file):
+        return jsonify([])
+    
+    import pandas as pd
+    try:
+        df = pd.read_csv(csv_file)
+        # Convert timestamp to string if needed and return as list of dicts
+        return jsonify(df.tail(100).to_dict(orient="records"))
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
