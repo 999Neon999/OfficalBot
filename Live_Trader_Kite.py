@@ -27,6 +27,8 @@ TOTP_SECRET = "E5HRMPZEN4QOOORKIPR5UX66E5SAG4VY"
 API_KEY = "vv25p1x1xjh0gpnr"
 API_SECRET = "2mj8gklqv9hjf51a3vuf31mm4xgety5f"
 TOKEN_FILE = "access_token.txt"
+MODEL_PATH = "recovered_model.cbm"
+INITIAL_CAPITAL = 11700
 # Strategy Parameters (V17 ALPHA HUNTER - GIGA MODE)
 BASE_TARGET_PCT = 0.0200    # V17 Aggressive Target (2.0%)
 STOP_LOSS_PCT = 2.0        
@@ -438,6 +440,7 @@ def scan_and_trade():
                         "charges": c_info['total'], "stt": c_info['stt'], "gst": c_info['gst'],
                         "breakeven": c_info['breakeven_pts'], "reason": exit_reason
                     })
+                    logger.log_trade("sell", ticker_raw, curr_p, pos.quantity, pnl, exit_reason)
                     print(f"✅ EXIT: {ticker} | {exit_reason} | Net PnL: ₹{pnl:.2f} (Tax: ₹{c_info['total']:.2f})")
                     del active_positions[ticker]
                     
@@ -489,6 +492,7 @@ def scan_and_trade():
                         "time": now, "ticker": ticker_raw, "side": "BUY", "price": curr_p, 
                         "qty": qty, "pnl": 0.0, "reason": f"Conf: {prob:.1%}"
                     })
+                    logger.log_trade("buy", ticker_raw, curr_p, qty, 0.0, f"Conf: {prob:.1%}")
                     if len(active_positions) >= MAX_CONCURRENT_TRADES: break
         except: continue
 
