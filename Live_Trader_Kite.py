@@ -16,6 +16,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from kiteconnect import KiteConnect
 import warnings
 from logger import logger
+import yfinance as yf
 
 warnings.filterwarnings("ignore")
 
@@ -29,26 +30,26 @@ API_SECRET = "2mj8gklqv9hjf51a3vuf31mm4xgety5f"
 TOKEN_FILE = "access_token.txt"
 MODEL_PATH = "recovered_model.cbm"
 INITIAL_CAPITAL = 11700
-# Strategy Parameters (V17 ALPHA HUNTER - GIGA MODE)
-BASE_TARGET_PCT = 0.0200    # V17 Aggressive Target (2.0%)
-STOP_LOSS_PCT = 2.0        
-TRAILING_EFFICIENCY = 0.90 
-SQUEEZE_THRESH = 0.00080    
-SQUEEZE_WIDTH_PCT = 0.0005  
-MAX_HOLD_BARS = 15
-MAX_HOLD_MINUTES = 15       # Fast Cycle Retention
-AI_THRESHOLD = 0.65         # V17 Alpha Threshold
-MAX_CONCURRENT_TRADES = 20  # V17 Density Slots
+
+# ================== OPTIMAL PARAMETERS (FROM BACKTEST) ==================
+AI_THRESHOLD = 0.70
+BASE_TARGET_PCT = 0.050          # 5.0%
+STOP_LOSS_PCT = 3.0               # 3.0%
+SQUEEZE_THRESH = 0.00080
+SQUEEZE_WIDTH_PCT = 0.0005
+HOLD_BARS_NORMAL = 4             # Core hold period (60 minutes)
+MAX_HOLD_BARS = 8                # Absolute max bars before forced exit
+MAX_CONCURRENT_TRADES = 20
+CHECK_INTERVAL_LIVE = 60         # Check every ~1 minute (15m data updates slowly)
+
+MAX_DAILY_LOSS = -2000
+TRADE_LOG_FILE = "v17_trade_log.csv"
 
 TIMEZONE = "Asia/Kolkata"
-CHECK_INTERVAL_LIVE = 15    
-MAX_DAILY_LOSS = -2000      # Circuit breaker: Stop if down ₹2000
-TRADE_LOG_FILE = "v17_trade_log.csv"
 
 # Session State
 SESSION_PNL = 0.0
 IS_Halt = False
-
 
 STOCK_META = {
     "TATASTEEL": {"Beta": 1.8, "Sector": "Metals"},
@@ -101,12 +102,12 @@ STOCK_META = {
     "SUNPHARMA": {"Beta": 1.4, "Sector": "Pharma"}
 }
 
-UNIQUE_SECTORS = ['Auto', 'Banking', 'Cables', 'Cement', 'Conglomerate', 'Diversified', 'Electronics', 'Energy', 'Finance', 'Fintech', 'Gas', 'Housing Finance', 'IT', 'Infra', 'Jewellery', 'Logistics', 'Metals', 'Mining', 'Pharma', 'Power', 'Railway', 'Railway Finance', 'Retail', 'Tech', 'Telecom']
+UNIQUE_SECTORS = ['Auto', 'Banking', 'Cables', 'Cement', 'Conglomerate', 'Diversified', 'Electronics', 'Energy',
+                  'Finance', 'Fintech', 'Gas', 'Housing Finance', 'IT', 'Infra', 'Jewellery', 'Logistics',
+                  'Metals', 'Mining', 'Pharma', 'Power', 'Railway', 'Railway Finance', 'Retail', 'Tech', 'Telecom']
 
 # ================== INITIALIZATION ==================
-
 def auto_kite_login():
-    """Automated login via Selenium to get a fresh access token."""
     print("Attempting Automated Kite Login (Headless)...")
     kite_api = KiteConnect(api_key=API_KEY)
     login_url = kite_api.login_url()
@@ -117,24 +118,20 @@ def auto_kite_login():
     chrome_options.add_argument("--disable-dev-shm-usage")
 
     try:
-        # Check common Pi Chromedriver paths
         pi_driver_path = "/usr/bin/chromedriver"
         if os.path.exists(pi_driver_path):
             service = Service(executable_path=pi_driver_path)
             driver = webdriver.Chrome(service=service, options=chrome_options)
         else:
-            # Fallback for Windows/Other
             driver = webdriver.Chrome(options=chrome_options)
         
         driver.get(login_url)
         wait = WebDriverWait(driver, 20)
         
-        # Enter User ID
         wait.until(EC.presence_of_element_located((By.ID, "userid"))).send_keys(USER_ID)
         driver.find_element(By.ID, "password").send_keys(PASSWORD)
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
         
-        # Handle TOTP
         clean_secret = TOTP_SECRET.replace(" ", "")
         totp = pyotp.TOTP(clean_secret)
         otp_code = totp.now()
@@ -164,7 +161,6 @@ def auto_kite_login():
         return None
 
 def initialize_kite():
-    """Initialize KiteConnect and handle token acquisition."""
     if os.path.exists(TOKEN_FILE):
         with open(TOKEN_FILE, "r") as f:
             token = f.read().strip()
@@ -203,7 +199,6 @@ except Exception as e:
     print(f"FATAL: Model loading failed: {e}")
     exit(1)
 
-# Features List (Must match Training)
 base_features = ['cum_delta','delta','msb','range_filter_dist','ob_dist_pct',
                 'vol_ratio','bars_since_msb','atr_ratio','vwap_dist_pct','ma20_dist_pct',
                 'rvol','adx','sess_high_dist_pct','sess_low_dist_pct',
@@ -211,71 +206,38 @@ base_features = ['cum_delta','delta','msb','range_filter_dist','ob_dist_pct',
 surgical_features = ['cmf', 'bb_percent', 'macd_hist_slope']
 features = base_features + ['beta'] + surgical_features + [f'sector_{sec}' for sec in UNIQUE_SECTORS]
 
-# ================== ROBUST API HELPERS ==================
-
+# ================== CHARGES (DETAILED - KEPT AS ORIGINAL) ==================
 def calculate_charges(buy_p, sell_p, qty):
-    """Calculate detailed Zerodha-style intraday equity charges."""
     buy_val = buy_p * qty
     sell_val = sell_p * qty
     turnover = buy_val + sell_val
     
-    # 1. Brokerage: 0.03% or Rs. 20 per order (capped at 20 per leg)
     buy_brokerage = min(20.0, buy_val * 0.0003)
     sell_brokerage = min(20.0, sell_val * 0.0003)
     total_brokerage = buy_brokerage + sell_brokerage
     
-    # 2. STT: 0.025% on Sell side only for Intraday Equity
     stt = sell_val * 0.00025
-    
-    # 3. Transaction Charges: ~0.00325% on turnover
     txn_charge = turnover * 0.0000325
-    
-    # 4. SEBI Charges: 0.0001% on turnover
     sebi_charge = turnover * 0.000001
-    
-    # 5. GST: 18% on (Brokerage + Txn Charge + SEBI)
     gst = (total_brokerage + txn_charge + sebi_charge) * 0.18
-    
-    # 6. Stamp Duty: 0.003% on Buy side only
     stamp_duty = buy_val * 0.00003
     
-    total_tax = stt + txn_charge + sebi_charge + gst + stamp_duty
-    total_charges = total_brokerage + total_tax
-    
+    total_charges = total_brokerage + stt + txn_charge + sebi_charge + gst + stamp_duty
     breakeven_pts = total_charges / qty
     
     return {
-        "brokerage": total_brokerage,
-        "stt": stt,
-        "txn_charge": txn_charge,
-        "sebi": sebi_charge,
-        "gst": gst,
-        "stamp": stamp_duty,
         "total": total_charges,
         "breakeven_pts": breakeven_pts
     }
 
 def log_v17_trade(data):
-    """Save trade to persistent CSV file."""
     df = pd.DataFrame([data])
     if not os.path.exists(TRADE_LOG_FILE):
         df.to_csv(TRADE_LOG_FILE, index=False)
     else:
         df.to_csv(TRADE_LOG_FILE, mode='a', header=False, index=False)
 
-def safe_kite_call(func, *args, **kwargs):
-    """Wrapper for general Kite API calls with simple retry."""
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            if attempt == max_retries - 1: raise e
-            print(f"API Call Warning: {e}. Retrying ({attempt+1}/{max_retries})...")
-            time.sleep(1)
-
 def place_order_with_retry(side, ticker, quantity, price=None, order_type=KiteConnect.ORDER_TYPE_MARKET):
-    """Robust order placement with exponential backoff."""
     max_retries = 3
     retry_delay = 2
     
@@ -296,7 +258,6 @@ def place_order_with_retry(side, ticker, quantity, price=None, order_type=KiteCo
             return order_id
         except Exception as e:
             err_str = str(e).lower()
-            # Don't retry if it's a fundamental account/input error
             if "insufficient" in err_str or "invalid" in err_str or "margin" in err_str:
                 print(f"PERMANENT ERROR: {e}")
                 return None
@@ -307,24 +268,9 @@ def place_order_with_retry(side, ticker, quantity, price=None, order_type=KiteCo
             
             print(f"RETRYABLE ERROR: {e}. Waiting {retry_delay}s...")
             time.sleep(retry_delay)
-            retry_delay *= 2 # Exponential backoff
+            retry_delay *= 2
 
-# ================== CORE LOGIC ==================
-
-class LivePosition:
-    def __init__(self, ticker, entry_price, quantity, initial_stop, initial_target, beta):
-        self.ticker = ticker
-        self.entry_price = entry_price
-        self.quantity = quantity
-        self.stop_loss = initial_stop
-        self.target_price = initial_target
-        self.beta = beta
-        self.status = "OPEN"
-        self.peak_price = entry_price
-        self.is_squeezed = False
-        self.p_5_ref = None # Price after 5 mins of entry for velocity check
-        self.entry_time = datetime.now(pytz.timezone(TIMEZONE))
-
+# ================== FEATURE ENGINEERING (SAME AS BACKTEST) ==================
 def add_features(df, stock_symbol):
     if len(df) < 50: return pd.DataFrame()
     df = df.copy()
@@ -332,7 +278,6 @@ def add_features(df, stock_symbol):
     
     try:
         c = df['close']; h = df['high']; l = df['low']; v = df['volume']
-        # Feature engineering logic (same as Paper.py)
         mf = ((c - l) - (h - c)) / (h - l + 1e-8) * v
         df['cmf'] = mf.rolling(20).sum() / v.rolling(20).sum().replace(0,1)
         ma20 = c.rolling(20).mean(); std20 = c.rolling(20).std()
@@ -382,137 +327,155 @@ def get_ai_prediction(df):
         latest_data = df.iloc[-1:].copy()
         for f in features:
             if f not in latest_data.columns: latest_data[f] = 0.0
-        # Passing DataFrame directly to ensure feature name mapping
         probs = model.predict_proba(latest_data[features])
         return float(probs[0][1])
     except Exception as e:
         print(f"Prediction Error: {e}")
         return 0.0
 
+# ================== POSITION CLASS ==================
+class LivePosition:
+    def __init__(self, ticker, entry_price, quantity, initial_stop, initial_target, beta):
+        self.ticker = ticker
+        self.entry_price = entry_price
+        self.quantity = quantity
+        self.stop_loss = initial_stop
+        self.target_price = initial_target
+        self.beta = beta
+        self.peak_price = entry_price
+        self.bars_held = 0
+        self.squeeze_applied = False
+
 active_positions = {}
 
+# ================== CORE TRADING LOOP ==================
 def scan_and_trade():
     global active_positions, SESSION_PNL, IS_Halt
-    import yfinance as yf
-    
     if IS_Halt: return
 
-    # 1. Manage Existing Positions
     now = datetime.now(pytz.timezone(TIMEZONE))
-    for ticker in list(active_positions.keys()):
-        pos = active_positions[ticker]
+    tickers = [t + ".NS" for t in STOCK_META.keys()]
+
+    # Fetch 15m data for all stocks at once
+    try:
+        data_15m = yf.download(tickers, period="5d", interval="15m", group_by='ticker', progress=False, auto_adjust=True)
+    except Exception as e:
+        print(f"Data fetch error: {e}")
+        return
+
+    # 1. Manage Existing Positions
+    for ticker_raw in list(active_positions.keys()):
+        pos = active_positions[ticker_raw]
         try:
-            df = yf.download(ticker + ".NS", period="1d", interval="1m", progress=False, auto_adjust=True)
-            if df.empty: continue
-            
-            curr_p = float(df['Close'].iloc[-1])
+            df = data_15m[ticker_raw + ".NS"].dropna()
+            if len(df) < 2: continue
+
+            current_bar = df.iloc[-1]
+            curr_p = current_bar['Close']
             pos.peak_price = max(pos.peak_price, curr_p)
-            elapsed = (now - pos.entry_time).total_seconds() / 60.0
-            
-            # Squeeze logic
-            if 5.5 < elapsed < 7.5 and pos.p_5_ref is None:
-                pos.p_5_ref = curr_p
-                v_6 = (curr_p - pos.entry_price) / pos.entry_price
-                if v_6 < SQUEEZE_THRESH:
-                    new_sl = pos.peak_price * (1 - SQUEEZE_WIDTH_PCT)
-                    if not pos.is_squeezed:
-                        print(f"⚠️  SQUEEZE: {ticker} stalled. SL -> {new_sl:.2f}")
-                        pos.is_squeezed = True
-                        pos.stop_loss = new_sl
+            pos.bars_held += 1
 
             exit_reason = None
-            if now.hour == 15 and now.minute >= 15: exit_reason = "EOD"
-            elif curr_p <= pos.stop_loss: exit_reason = "SL/SQZ"
-            elif elapsed >= MAX_HOLD_MINUTES: exit_reason = "TIME"
-            elif curr_p >= pos.target_price: exit_reason = "TGT"
+            exit_price = curr_p
+
+            if curr_p <= pos.stop_loss:
+                exit_reason = "SL"
+                exit_price = pos.stop_loss
+            elif curr_p >= pos.target_price:
+                exit_reason = "TARGET"
+                exit_price = pos.target_price
+            elif pos.bars_held == 6 and not pos.squeeze_applied:  # After exactly 6 bars (~90min)
+                move_pct = (curr_p - pos.entry_price) / pos.entry_price
+                if move_pct < SQUEEZE_THRESH:
+                    new_sl = pos.peak_price * (1 - SQUEEZE_WIDTH_PCT)
+                    pos.stop_loss = max(pos.stop_loss, new_sl)
+                    pos.squeeze_applied = True
+                    print(f"⚠️ SQUEEZE: {ticker_raw} | Tightened SL to {new_sl:.2f}")
+            elif pos.bars_held >= MAX_HOLD_BARS:
+                exit_reason = "MAX_TIME"
+            elif now.hour >= 15 and now.minute >= 15:
+                exit_reason = "EOD"
 
             if exit_reason:
-                order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_SELL, ticker=ticker, quantity=pos.quantity)
+                order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_SELL, ticker=ticker_raw, quantity=pos.quantity)
                 if order_id:
-                    # Detailed Charges Calculation
-                    c_info = calculate_charges(pos.entry_price, curr_p, pos.quantity)
-                    pnl = (curr_p - pos.entry_price) * pos.quantity - c_info['total']
+                    c_info = calculate_charges(pos.entry_price, exit_price, pos.quantity)
+                    pnl = (exit_price - pos.entry_price) * pos.quantity - c_info['total']
                     SESSION_PNL += pnl
-                    
+
                     log_v17_trade({
-                        "time": now, "ticker": ticker, "side": "SELL", "price": curr_p, 
-                        "qty": pos.quantity, "pnl": pnl, 
-                        "charges": c_info['total'], "stt": c_info['stt'], "gst": c_info['gst'],
-                        "breakeven": c_info['breakeven_pts'], "reason": exit_reason
+                        "time": now, "ticker": ticker_raw, "side": "SELL", "price": exit_price,
+                        "qty": pos.quantity, "pnl": pnl, "charges": c_info['total'], "reason": exit_reason
                     })
-                    logger.log_trade("sell", ticker_raw, curr_p, pos.quantity, pnl, exit_reason)
-                    print(f"✅ EXIT: {ticker} | {exit_reason} | Net PnL: ₹{pnl:.2f} (Tax: ₹{c_info['total']:.2f})")
-                    del active_positions[ticker]
-                    
+                    print(f"✅ EXIT {ticker_raw} | {exit_reason} @ {exit_price:.2f} | PnL: ₹{pnl:.2f}")
+                    del active_positions[ticker_raw]
+
                     if SESSION_PNL <= MAX_DAILY_LOSS:
-                        print(f"🛑 CIRCUIT BREAKER TRIPPED! Session PnL: ₹{SESSION_PNL:.2f}")
+                        print(f"🛑 DAILY LOSS LIMIT HIT: ₹{SESSION_PNL:.2f}")
                         IS_Halt = True
-        except Exception as e: print(f"Error managing {ticker}: {e}")
+        except Exception as e:
+            print(f"Error managing {ticker_raw}: {e}")
 
-    # 2. Scanning for New Entries
-    if len(active_positions) >= MAX_CONCURRENT_TRADES: return
-    if now.hour == 15 and now.minute >= 10: return
-
-    tickers = [t + ".NS" for t in STOCK_META.keys()]
-    try:
-        data = yf.download(tickers, period="3d", interval="1m", group_by='ticker', progress=False, auto_adjust=True)
-    except: return
+    # 2. Scan for New Entries
+    if len(active_positions) >= MAX_CONCURRENT_TRADES:
+        return
+    if now.hour >= 15 and now.minute >= 10:
+        return
 
     for sym in tickers:
         ticker_raw = sym.replace('.NS', '')
         if ticker_raw in active_positions: continue
-        
+
         try:
-            df = data[sym].dropna().copy()
+            df = data_15m[sym].dropna()
             if len(df) < 50: continue
-            
-            # Resample for AI features (15m bars)
-            df_15m = df.resample('15min', label='left', closed='left', origin='start_day').agg({
-                'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'
-            }).dropna()
-            
-            if len(df_15m) < 20: continue # Need at least some bars
-            
-            pdf = add_features(df_15m, sym)
+
+            pdf = add_features(df, sym)
+            if pdf.empty: continue
+
             prob = get_ai_prediction(pdf)
-            
-            if prob >= AI_THRESHOLD:
-                curr_p = float(df['Close'].iloc[-1])
-                beta = pdf['beta'].iloc[-1]
-                qty = int(INITIAL_CAPITAL / curr_p)
-                if qty < 1: continue
-                
-                print(f"🚀 SIGNAL: {ticker_raw} | Conf: {prob:.1%} | Price: ₹{curr_p}")
-                order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_BUY, ticker=ticker_raw, quantity=qty)
-                if order_id:
-                    target = curr_p * (1 + BASE_TARGET_PCT * beta)
-                    sl = curr_p * (1 - STOP_LOSS_PCT/100.0)
-                    active_positions[ticker_raw] = LivePosition(ticker_raw, curr_p, qty, sl, target, beta)
-                    log_v17_trade({
-                        "time": now, "ticker": ticker_raw, "side": "BUY", "price": curr_p, 
-                        "qty": qty, "pnl": 0.0, "reason": f"Conf: {prob:.1%}"
-                    })
-                    logger.log_trade("buy", ticker_raw, curr_p, qty, 0.0, f"Conf: {prob:.1%}")
-                    if len(active_positions) >= MAX_CONCURRENT_TRADES: break
-        except: continue
+            if prob < AI_THRESHOLD: continue
+
+            curr_p = df['Close'].iloc[-1]
+            qty = int(INITIAL_CAPITAL / curr_p)
+            if qty < 1: continue
+
+            print(f"🚀 SIGNAL: {ticker_raw} | Conf: {prob:.1%} | Price: ₹{curr_p:.2f}")
+
+            order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_BUY, ticker=ticker_raw, quantity=qty)
+            if order_id:
+                target = curr_p * (1 + BASE_TARGET_PCT)
+                sl = curr_p * (1 - STOP_LOSS_PCT / 100.0)
+
+                active_positions[ticker_raw] = LivePosition(ticker_raw, curr_p, qty, sl, target, pdf['beta'].iloc[-1])
+
+                log_v17_trade({
+                    "time": now, "ticker": ticker_raw, "side": "BUY", "price": curr_p,
+                    "qty": qty, "pnl": 0.0, "reason": f"Signal {prob:.1%}"
+                })
+
+                if len(active_positions) >= MAX_CONCURRENT_TRADES:
+                    break
+        except Exception as e:
+            continue
 
 if __name__ == "__main__":
-    print("\n" + "="*50)
-    print("☢️  V17 ALPHA HUNTER - GIGA MODE ACTIVE")
-    print(f"Goal: BEYOND OMNIPOTENCE | Thresh: {AI_THRESHOLD} | Slots: {MAX_CONCURRENT_TRADES}")
-    print("="*50 + "\n")
-    
+    print("\n" + "="*60)
+    print("☢️  V17 ALPHA HUNTER - 15M OPTIMAL MODE (BACKTEST ALIGNED)")
+    print(f"Threshold: {AI_THRESHOLD} | Target: {BASE_TARGET_PCT:.1%} | SL: {STOP_LOSS_PCT}% | Max Hold: {MAX_HOLD_BARS} bars")
+    print("="*60 + "\n")
+
     while True:
         try:
             now = datetime.now(pytz.timezone(TIMEZONE))
-            # Refresh Dashboard line
             status = "HALTED" if IS_Halt else "RUNNING"
-            print(f"[{now.strftime('%H:%M:%S')}] {status} | Slots: {len(active_positions)}/{MAX_CONCURRENT_TRADES} | PnL: ₹{SESSION_PNL:.2f}", end="\r")
+            print(f"[{now.strftime('%H:%M:%S')}] {status} | Trades: {len(active_positions)}/{MAX_CONCURRENT_TRADES} | Session PnL: ₹{SESSION_PNL:.2f}", end="\r")
             
             scan_and_trade()
         except KeyboardInterrupt:
-            print("\n👋 Graceful Shutdown Initiated...")
+            print("\n👋 Shutdown requested...")
             break
         except Exception as e:
-            print(f"\n⚠️  Loop Error: {e}")
+            print(f"\n⚠️ Main loop error: {e}")
+        
         time.sleep(CHECK_INTERVAL_LIVE)
