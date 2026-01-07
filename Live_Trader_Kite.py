@@ -32,15 +32,15 @@ MODEL_PATH = "recovered_model.cbm"
 INITIAL_CAPITAL = 11700
 
 # ================== OPTIMAL PARAMETERS (FROM BACKTEST) ==================
-AI_THRESHOLD = 0.70
-BASE_TARGET_PCT = 0.050          # 5.0%
-STOP_LOSS_PCT = 3.0               # 3.0%
-SQUEEZE_THRESH = 0.00080
-SQUEEZE_WIDTH_PCT = 0.0005
-HOLD_BARS_NORMAL = 4             # Core hold period (60 minutes)
-MAX_HOLD_BARS = 8                # Absolute max bars before forced exit
+AI_THRESHOLD = 0.40
+BASE_TARGET_PCT = 0.003          # 0.3%
+STOP_LOSS_PCT = 0.5               # 0.5%
+SQUEEZE_THRESH = 0.00010
+SQUEEZE_WIDTH_PCT = 0.0000        # Exit at peak (or current price)
+MAX_HOLD_BARS = 12               # 3 Hours
 MAX_CONCURRENT_TRADES = 20
-CHECK_INTERVAL_LIVE = 60         # Check every ~1 minute (15m data updates slowly)
+CHECK_INTERVAL_LIVE = 60         # Check every ~1 minute
+USE_BETA = False                 # Neutralize Beta as per optimization
 
 MAX_DAILY_LOSS = -2000
 TRADE_LOG_FILE = "v17_trade_log.csv"
@@ -286,8 +286,11 @@ def add_features(df, stock_symbol):
         df['macd_hist_slope'] = (macd - macd.ewm(span=9, adjust=False).mean()).diff()
         delta = v * (2*c - h - l) / (h - l + 1e-8)
         df['cum_delta'] = delta.rolling(50).sum(); df['delta'] = delta
-        swing_h = h.rolling(20, center=True).max().ffill().shift(1)
-        swing_l = l.rolling(20, center=True).min().ffill().shift(1)
+        
+        # FIX: Removed center=True
+        swing_h = h.rolling(20).max().ffill().shift(1)
+        swing_l = l.rolling(20).min().ffill().shift(1)
+        
         df['msb'] = np.where(h > swing_h, 1, np.where(l < swing_l, -1, 0))
         df['bars_since_msb'] = df['msb'].abs().cumsum()
         tr = np.abs(np.diff(c, prepend=c.iloc[0]))
@@ -315,7 +318,10 @@ def add_features(df, stock_symbol):
         df['atr_ratio_slope'] = df['atr_ratio'].diff(); df['rvol_slope'] = df['rvol'].diff(); df['adx_slope'] = df['adx'].diff()
         
         meta = STOCK_META.get(stock_symbol.replace('.NS', ''), {})
-        df['beta'] = meta.get('Beta', 1.0)
+        if USE_BETA:
+            df['beta'] = meta.get('Beta', 1.0)
+        else:
+            df['beta'] = 1.0 # Neutralize beta
         sec = meta.get('Sector', 'Other')
         for s in UNIQUE_SECTORS: df[f'sector_{s}'] = 1 if s == sec else 0
         return df
@@ -335,7 +341,7 @@ def get_ai_prediction(df):
 
 # ================== POSITION CLASS ==================
 class LivePosition:
-    def __init__(self, ticker, entry_price, quantity, initial_stop, initial_target, beta):
+    def __init__(self, ticker, entry_price, quantity, initial_stop, initial_target, beta, entry_time):
         self.ticker = ticker
         self.entry_price = entry_price
         self.quantity = quantity
@@ -344,6 +350,7 @@ class LivePosition:
         self.beta = beta
         self.peak_price = entry_price
         self.bars_held = 0
+        self.last_bar_time = entry_time # Track trade aging by BAR, not minute
         self.squeeze_applied = False
 
 active_positions = {}
@@ -358,7 +365,9 @@ def scan_and_trade():
 
     # Fetch 15m data for all stocks at once
     try:
-        data_15m = yf.download(tickers, period="5d", interval="15m", group_by='ticker', progress=False, auto_adjust=True)
+        # FEATURE WARM-UP: Strategy uses 199 EMA. 
+        # Fetching 60d (~1500 bars) ensures perfect stability matching backtest.
+        data_15m = yf.download(tickers, period="60d", interval="15m", group_by='ticker', progress=False, auto_adjust=True)
     except Exception as e:
         print(f"Data fetch error: {e}")
         return
@@ -373,7 +382,11 @@ def scan_and_trade():
             current_bar = df.iloc[-1]
             curr_p = current_bar['Close']
             pos.peak_price = max(pos.peak_price, curr_p)
-            pos.bars_held += 1
+            # Accurate Bar Counting
+            current_bar_time = df.index[-1]
+            if current_bar_time > pos.last_bar_time:
+                pos.bars_held += 1
+                pos.last_bar_time = current_bar_time
 
             exit_reason = None
             exit_price = curr_p
@@ -384,13 +397,13 @@ def scan_and_trade():
             elif curr_p >= pos.target_price:
                 exit_reason = "TARGET"
                 exit_price = pos.target_price
-            elif pos.bars_held == 6 and not pos.squeeze_applied:  # After exactly 6 bars (~90min)
+            elif pos.bars_held == 6:  # Squeeze Check at 90 mins
                 move_pct = (curr_p - pos.entry_price) / pos.entry_price
                 if move_pct < SQUEEZE_THRESH:
-                    new_sl = pos.peak_price * (1 - SQUEEZE_WIDTH_PCT)
-                    pos.stop_loss = max(pos.stop_loss, new_sl)
-                    pos.squeeze_applied = True
-                    print(f"⚠️ SQUEEZE: {ticker_raw} | Tightened SL to {new_sl:.2f}")
+                    exit_reason = "SQUEEZE_EXIT"
+                    print(f"⚠️ SQUEEZE: {ticker_raw} | Stalled at 6 bars. Exiting.")
+            elif pos.bars_held >= MAX_HOLD_BARS:
+                exit_reason = "MAX_TIME"
             elif pos.bars_held >= MAX_HOLD_BARS:
                 exit_reason = "MAX_TIME"
             elif now.hour >= 15 and now.minute >= 15:
@@ -447,7 +460,7 @@ def scan_and_trade():
                 target = curr_p * (1 + BASE_TARGET_PCT)
                 sl = curr_p * (1 - STOP_LOSS_PCT / 100.0)
 
-                active_positions[ticker_raw] = LivePosition(ticker_raw, curr_p, qty, sl, target, pdf['beta'].iloc[-1])
+                active_positions[ticker_raw] = LivePosition(ticker_raw, curr_p, qty, sl, target, pdf['beta'].iloc[-1], df.index[-1])
 
                 log_v17_trade({
                     "time": now, "ticker": ticker_raw, "side": "BUY", "price": curr_p,
