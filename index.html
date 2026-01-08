@@ -1,453 +1,633 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>V17 ALPHA HUNTER | Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <title>NEXUS TERMINAL | V17 GIGA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        dark: '#030712',
+                        card: '#111827',
+                        primary: '#3b82f6',
+                        accent: '#8b5cf6',
+                        success: '#10b981',
+                        danger: '#ef4444',
+                        textMain: '#f3f4f6',
+                        textMuted: '#9ca3af',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        :root {
-            --bg: #030712;
-            --card-bg: rgba(17, 24, 39, 0.7);
-            --accent-blue: #38bdf8;
-            --accent-purple: #818cf8;
-            --success: #10b981;
-            --danger: #f43f5e;
-            --warning: #f59e0b;
-            --text-primary: #f8fafc;
-            --text-secondary: #94a3b8;
-            --glass-border: rgba(255, 255, 255, 0.1);
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Outfit', sans-serif;
-        }
-
         body {
-            background-color: var(--bg);
-            background-image: 
-                radial-gradient(circle at 10% 20%, rgba(56, 189, 248, 0.05) 0%, transparent 40%),
-                radial-gradient(circle at 90% 80%, rgba(129, 140, 248, 0.05) 0%, transparent 40%);
-            color: var(--text-primary);
-            min-height: 100vh;
-            padding: 2rem;
-            overflow-x: hidden;
+            background-color: #030712;
+            color: #f3f4f6;
         }
 
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        /* --- Header --- */
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 3rem;
-        }
-
-        .logo-section h1 {
-            font-size: 2rem;
-            font-weight: 700;
-            letter-spacing: -0.05em;
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .logo-section h1 span {
-            font-weight: 300;
-            font-size: 0.8rem;
-            letter-spacing: 0.2em;
-            color: var(--text-secondary);
-            -webkit-text-fill-color: var(--text-secondary);
-        }
-
-        .status-badge {
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.2);
-            color: var(--success);
-            padding: 0.5rem 1rem;
-            border-radius: 99px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            background: var(--success);
-            border-radius: 50%;
-            box-shadow: 0 0 10px var(--success);
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0% { transform: scale(0.95); opacity: 1; }
-            70% { transform: scale(1.1); opacity: 0.5; }
-            100% { transform: scale(0.95); opacity: 1; }
-        }
-
-        /* --- Stats Cards --- */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .stat-card {
-            background: var(--card-bg);
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.7);
             backdrop-filter: blur(12px);
-            border: 1px solid var(--glass-border);
-            border-radius: 1.25rem;
-            padding: 1.5rem;
-            transition: transform 0.3s ease, border-color 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.08);
         }
 
-        .stat-card:hover {
-            transform: translateY(-5px);
-            border-color: rgba(56, 189, 248, 0.3);
+        .sidebar-link {
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+            cursor: pointer;
         }
 
-        .stat-label {
-            color: var(--text-secondary);
-            font-size: 0.85rem;
-            margin-bottom: 0.75rem;
+        .sidebar-link:hover,
+        .sidebar-link.active {
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+            border-left-color: #3b82f6;
         }
 
-        .stat-value {
-            font-size: 2rem;
-            font-weight: 700;
-            letter-spacing: -0.02em;
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
         }
 
-        .value-up { color: var(--success); }
-        .value-down { color: var(--danger); }
-
-        /* --- Main Layout --- */
-        .main-grid {
-            display: grid;
-            grid-template-columns: 1fr 380px;
-            gap: 2rem;
+        ::-webkit-scrollbar-track {
+            background: transparent;
         }
 
-        .section-card {
-            background: var(--card-bg);
-            backdrop-filter: blur(12px);
-            border: 1px solid var(--glass-border);
-            border-radius: 1.5rem;
-            padding: 2rem;
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 4px;
         }
 
-        .section-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4b5563;
         }
 
-        .section-header h2 {
-            font-size: 1.25rem;
-            color: var(--text-primary);
+        .glow-text {
+            text-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
         }
 
-        /* --- Tables --- */
-        .table-container {
-            overflow-x: auto;
+        .glow-success {
+            text-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
         }
 
-        table {
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0 10px;
-        }
-
-        th {
-            text-align: left;
-            padding: 0 1rem 0.5rem 1rem;
-            color: var(--text-secondary);
-            font-weight: 500;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        tr.trade-row {
-            background: rgba(255, 255, 255, 0.02);
-            transition: background 0.2s;
-        }
-
-        tr.trade-row:hover {
-            background: rgba(255, 255, 255, 0.05);
-        }
-
-        td {
-            padding: 1rem;
-            font-size: 0.9rem;
-        }
-
-        td:first-child { border-radius: 1rem 0 0 1rem; }
-        td:last-child { border-radius: 0 1rem 1rem 0; }
-
-        .ticker-name { font-weight: 700; color: var(--accent-blue); }
-        .price-mono { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
-
-        .badge {
-            padding: 0.25rem 0.75rem;
-            border-radius: 0.5rem;
-            font-size: 0.7rem;
-            font-weight: 700;
-            text-transform: uppercase;
-        }
-        .badge-buy { background: rgba(16, 185, 129, 0.15); color: var(--success); }
-        .badge-sell { background: rgba(244, 63, 94, 0.15); color: var(--danger); }
-
-        /* --- Active Positions List --- */
-        .position-item {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid var(--glass-border);
-            border-radius: 1rem;
-            padding: 1.25rem;
-            margin-bottom: 1rem;
-            transition: transform 0.2s;
-        }
-
-        .position-item:hover { transform: scale(1.02); }
-
-        .position-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem; }
-        .position-info span { font-size: 0.7rem; color: var(--text-secondary); display: block; }
-        .position-pnl { font-weight: 700; font-family: 'JetBrains Mono', monospace; }
-
-        /* --- Master Log Section --- */
-        .master-log-section {
-            margin-top: 3rem;
-            max-height: 600px;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .log-scroll {
-            overflow-y: auto;
-            flex-grow: 1;
-            padding-right: 10px;
-        }
-
-        .log-scroll::-webkit-scrollbar { width: 6px; }
-        .log-scroll::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 10px; }
-
-        @media (max-width: 1100px) {
-            .stats-grid { grid-template-columns: repeat(2, 1fr); }
-            .main-grid { grid-template-columns: 1fr; }
+        .glow-danger {
+            text-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
         }
     </style>
 </head>
-<body>
-    <div class="container">
-        <header>
-            <div class="logo-section">
-                <h1>V17 ALPHA HUNTER <span>GIGA MODE</span></h1>
+
+<body class="flex h-screen overflow-hidden text-sm">
+
+    <!-- SIDEBAR -->
+    <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col hidden md:flex">
+        <div class="h-16 flex items-center px-6 border-b border-gray-800">
+            <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                NEXUS<span class="text-blue-500">TERMINAL</span>
+            </h1>
+        </div>
+
+        <nav class="flex-1 py-6 px-3 space-y-1">
+            <div id="link-dashboard" onclick="switchView('dashboard')"
+                class="sidebar-link active flex items-center gap-3 px-3 py-2.5 rounded-r-lg font-medium">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z">
+                    </path>
+                </svg>
+                Dashboard
             </div>
-            <div class="status-badge" id="bot-status">
-                <div class="status-dot"></div>
-                SYSTEM ACTIVE
+            <!-- Coming Soon
+            <div id="link-performance" onclick="switchView('performance')" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-r-lg font-medium text-gray-400">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                Performance
+            </div>
+            -->
+            <div id="link-logs" onclick="switchView('logs')"
+                class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-r-lg font-medium text-gray-400">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
+                    </path>
+                </svg>
+                Trade Logs
+            </div>
+            <div id="link-settings" onclick="switchView('settings')"
+                class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-r-lg font-medium text-gray-400">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z">
+                    </path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+                System Config
+            </div>
+        </nav>
+
+        <div class="p-4 border-t border-gray-800">
+            <div class="glass-panel p-3 rounded-lg">
+                <div class="text-xs text-gray-400 font-medium mb-1">STRATEGY</div>
+                <div class="text-white font-bold">V17 GIGA (1M MODE)</div>
+                <div class="flex items-center gap-2 mt-2">
+                    <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                    <span class="text-xs text-green-400 font-mono">ACTIVE</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        <!-- Top Bar -->
+        <header
+            class="h-16 bg-gray-900/50 backdrop-blur-md border-b border-gray-800 flex justify-between items-center px-6 sticky top-0 z-20">
+            <div class="font-medium text-gray-400">Welcome back, <span class="text-white">Commander</span></div>
+            <div class="flex items-center gap-4">
+                <div
+                    class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-mono font-bold">
+                    <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                    CONNECT: CLOUDFLARE
+                </div>
+                <div class="text-xs text-gray-500 font-mono" id="last-update">SYNCING...</div>
             </div>
         </header>
 
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-label">Session Profit (Net)</div>
-                <div id="session-pnl" class="stat-value">₹0.00</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Total Lifetime Profit</div>
-                <div id="total-pnl" class="stat-value">₹0.00</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Max Drawdown Used</div>
-                <div id="drawdown" class="stat-value">₹0.00</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Active Slots</div>
-                <div id="slot-efficiency" class="stat-value">0 / 20</div>
-            </div>
-        </div>
+        <div class="flex-1 overflow-y-auto p-6 relative">
 
-        <div class="main-grid">
-            <!-- Left: Top Signals / Recent History -->
-            <div class="section-card">
-                <div class="section-header">
-                    <h2>Live Trade Execution</h2>
-                    <div id="last-update" style="font-size: 0.75rem; color: var(--text-secondary)">Syncing...</div>
+            <!-- VIEW: DASHBOARD -->
+            <div id="view-dashboard" class="space-y-6 view-section">
+                <!-- TOP STATS ROW -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <!-- Card 1: Today PnL -->
+                    <div class="glass-panel rounded-xl p-5 relative overflow-hidden group">
+                        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <svg class="w-16 h-16 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z"></path>
+                                <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z"></path>
+                            </svg>
+                        </div>
+                        <div class="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-1">Session Net PnL
+                        </div>
+                        <div class="text-2xl font-bold text-white mb-2" id="session-pnl">₹0.00</div>
+                        <div class="flex items-center gap-3 text-xs border-t border-gray-700/50 pt-2 mt-2">
+                            <div class="flex items-center gap-1">
+                                <span class="text-gray-400">WR:</span>
+                                <span class="font-mono text-white" id="daily-win-rate">0%</span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="text-gray-400">Trades:</span>
+                                <span class="font-mono text-white" id="daily-trades">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 2: Total ROI -->
+                    <div class="glass-panel rounded-xl p-5 relative overflow-hidden group">
+                        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <svg class="w-16 h-16 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd"
+                                    d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 15.293 6.293A1 1 0 0116.707 7.707L12 12.414V7z"
+                                    clip-rule="evenodd"></path>
+                            </svg>
+                        </div>
+                        <div class="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-1">Total Net ROI
+                        </div>
+                        <div class="text-2xl font-bold text-white mb-2" id="roi-pct">0.00%</div>
+                        <div class="flex items-center gap-3 text-xs border-t border-gray-700/50 pt-2 mt-2">
+                            <span class="text-gray-500 font-mono" id="total-pnl">₹0.00</span>
+                        </div>
+                    </div>
+
+                    <!-- Card 3: Metrics -->
+                    <div class="glass-panel rounded-xl p-5 relative overflow-hidden">
+                        <div class="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-3">Overall
+                            Performance</div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <div class="text-xs text-gray-500 mb-1">WIN RATE</div>
+                                <div class="text-lg font-bold text-white font-mono" id="total-win-rate">0%</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-gray-500 mb-1">AVG DUR</div>
+                                <div class="text-lg font-bold text-white font-mono" id="avg-duration">0m</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Card 4: Slots -->
+                    <div class="glass-panel rounded-xl p-5 flex flex-col justify-center items-center relative">
+                        <svg class="w-20 h-20 text-gray-800 absolute opacity-20" fill="currentColor"
+                            viewBox="0 0 20 20">
+                            <path
+                                d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z">
+                            </path>
+                        </svg>
+                        <div class="text-3xl font-bold text-white z-10 font-mono" id="active-slots">0/20</div>
+                        <div class="text-xs text-blue-400 font-medium mt-1 z-10 tracking-widest">ACTIVE SLOTS</div>
+                    </div>
                 </div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Time</th>
-                                <th>Symbol</th>
-                                <th>Action</th>
-                                <th>Price</th>
-                                <th>Qty</th>
-                                <th>Result</th>
-                            </tr>
-                        </thead>
-                        <tbody id="live-trades-body">
+
+                <!-- CHART & POSITIONS ROW -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- Chart Section -->
+                    <div class="lg:col-span-2 glass-panel rounded-xl p-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-white font-semibold flex items-center gap-2">
+                                <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z">
+                                    </path>
+                                </svg>
+                                Equity Growth
+                            </h3>
+                        </div>
+                        <div class="h-[300px] w-full relative">
+                            <canvas id="pnlChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Active Positions List -->
+                    <div class="glass-panel rounded-xl p-6 flex flex-col h-[400px]">
+                        <div class="flex justify-between items-center mb-4 border-b border-gray-800 pb-2">
+                            <h3 class="text-white font-semibold">Live Positions</h3>
+                            <span class="relative flex h-3 w-3">
+                                <span
+                                    class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                            </span>
+                        </div>
+                        <div class="flex-1 overflow-y-auto pr-2 space-y-3" id="positions-list">
+                            <!-- Items injected here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DATA TABLES ROW -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-6">
+                    <!-- Recent Trades Log -->
+                    <div class="glass-panel rounded-xl overflow-hidden flex flex-col h-[400px]">
+                        <div class="p-4 border-b border-gray-800 bg-gray-900/40">
+                            <h3 class="text-white font-semibold text-sm uppercase tracking-wide">Recent Executions</h3>
+                        </div>
+                        <div class="overflow-x-auto flex-1">
+                            <table class="w-full text-left">
+                                <thead class="bg-gray-800/50 text-xs text-gray-400 uppercase font-medium">
+                                    <tr>
+                                        <th class="px-4 py-3">Time</th>
+                                        <th class="px-4 py-3">Ticker</th>
+                                        <th class="px-4 py-3">Side</th>
+                                        <th class="px-4 py-3">Price</th>
+                                        <th class="px-4 py-3">PnL</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-800 text-gray-300" id="live-trades-body">
+                                    <!-- JS Populated -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Simplified Ledger Preview -->
+                    <div class="glass-panel rounded-xl overflow-hidden flex flex-col h-[400px]">
+                        <div class="p-4 border-b border-gray-800 bg-gray-900/40 flex justify-between">
+                            <h3 class="text-white font-semibold text-sm uppercase tracking-wide">Ledger Preview</h3>
+                            <button onclick="switchView('logs')" class="text-xs text-blue-400 hover:text-blue-300">View
+                                All ></button>
+                        </div>
+                        <div class="overflow-x-auto flex-1">
+                            <table class="w-full text-left">
+                                <thead class="bg-gray-800/50 text-xs text-gray-400 uppercase font-medium">
+                                    <tr>
+                                        <th class="px-4 py-3">Ticker</th>
+                                        <th class="px-4 py-3">Side</th>
+                                        <th class="px-4 py-3 text-right">Net PnL</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-800 text-gray-300 font-mono text-xs"
+                                    id="ledger-preview-body">
+                                    <!-- JS Populated -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW: PERFORMANCE (Placeholder / Detailed Chart) -->
+            <div id="view-performance" class="view-section hidden space-y-6">
+                <div class="glass-panel rounded-xl p-6">
+                    <h2 class="text-xl font-bold text-white mb-4">Performance Analytics</h2>
+                    <p class="text-gray-400">Detailed historical performance metrics and advanced charting are under
+                        construction. Use the Dashboard view for real-time equity curve.</p>
+                </div>
+            </div>
+
+            <!-- VIEW: TRADE LOGS (Full Table) -->
+            <div id="view-logs" class="view-section hidden space-y-6">
+                <div class="glass-panel rounded-xl overflow-hidden flex flex-col">
+                    <div class="p-6 border-b border-gray-800 bg-gray-900/40 flex justify-between items-center">
+                        <h3 class="text-white font-semibold text-lg">Master Trade Audit</h3>
+                        <div class="text-xs text-gray-500">Full History</div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-gray-800/50 text-xs text-gray-400 uppercase font-medium">
+                                <tr>
+                                    <th class="px-6 py-4">Time</th>
+                                    <th class="px-6 py-4">Ticker</th>
+                                    <th class="px-6 py-4">Side</th>
+                                    <th class="px-6 py-4 text-right">Price</th>
+                                    <th class="px-6 py-4 text-right">Net PnL</th>
+                                    <th class="px-6 py-4 text-right">Charges</th>
+                                    <th class="px-6 py-4">Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-800 text-gray-300 font-mono text-sm" id="full-log-body">
+                                <!-- JS Populated -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW: SETTINGS -->
+            <div id="view-settings" class="view-section hidden space-y-6">
+                <h2 class="text-2xl font-bold text-white mb-6">System Configuration</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Strategy Params -->
+                    <div class="glass-panel rounded-xl p-6">
+                        <h3 class="text-blue-400 font-semibold mb-4 text-sm uppercase tracking-wider">Strategy
+                            Parameters</h3>
+                        <div class="space-y-4" id="settings-strategy">
                             <!-- Populated via JS -->
-                        </tbody>
-                    </table>
+                            <div class="animate-pulse flex space-x-4">
+                                <div class="rounded-full bg-gray-700 h-10 w-10"></div>
+                                <div class="flex-1 space-y-6 py-1">
+                                    <div class="h-2 bg-gray-700 rounded"></div>
+                                    <div class="space-y-3">
+                                        <div class="grid grid-cols-3 gap-4">
+                                            <div class="h-2 bg-gray-700 rounded col-span-2"></div>
+                                            <div class="h-2 bg-gray-700 rounded col-span-1"></div>
+                                        </div>
+                                        <div class="h-2 bg-gray-700 rounded"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Risk Management -->
+                    <div class="glass-panel rounded-xl p-6">
+                        <h3 class="text-purple-400 font-semibold mb-4 text-sm uppercase tracking-wider">Risk Management
+                        </h3>
+                        <div class="space-y-4" id="settings-risk">
+                            <!-- Populated via JS -->
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Right: Open Positions -->
-            <div class="section-card">
-                <div class="section-header">
-                    <h2>Open Positions</h2>
-                </div>
-                <div id="positions-container">
-                    <!-- Populated via JS -->
-                </div>
-            </div>
         </div>
-
-        <!-- Master Accounting Log -->
-        <div class="section-card master-log-section">
-            <div class="section-header">
-                <h2>Master Accounting Log (V17 Tracker)</h2>
-                <span style="font-size: 0.7rem; color: var(--text-secondary)">Real-time Tax & Breakeven Tracking</span>
-            </div>
-            <div class="log-scroll">
-                <table style="border-spacing: 0;">
-                    <thead style="position: sticky; top: 0; background: var(--bg); z-index: 10;">
-                        <tr>
-                            <th>Ticker</th>
-                            <th>Side</th>
-                            <th>Net PnL</th>
-                            <th>Tax/Charges</th>
-                            <th>Breakeven</th>
-                            <th>Reason</th>
-                        </tr>
-                    </thead>
-                    <tbody id="master-log-body">
-                        <!-- Populated via JS -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+    </main>
 
     <script>
+        // --- NAVIGATION ---
+        function switchView(viewName) {
+            // Hide all
+            document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.sidebar-link').forEach(el => el.classList.remove('active', 'text-blue-500', 'bg-blue-500/10'));
+
+            // Show Target
+            document.getElementById(`view-${viewName}`).classList.remove('hidden');
+
+            // Update Sidebar
+            const linkId = `link-${viewName}`;
+            const link = document.getElementById(linkId);
+            if (link) {
+                link.classList.add('active', 'text-blue-500', 'bg-blue-500/10');
+                link.classList.remove('text-gray-400');
+            }
+        }
+
+        // --- CHART CONFIG ---
+        let pnlChart = null;
+        const ctx = document.getElementById('pnlChart').getContext('2d');
+        const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+        gradient.addColorStop(0, 'rgba(59, 130, 246, 0.2)');
+        gradient.addColorStop(1, 'rgba(59, 130, 246, 0)');
+
+        function initChart() {
+            pnlChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Net PnL (₹)',
+                        data: [],
+                        borderColor: '#3b82f6',
+                        backgroundColor: gradient,
+                        borderWidth: 2,
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            mode: 'index', intersect: false,
+                            backgroundColor: 'rgba(17, 24, 39, 0.9)',
+                            titleColor: '#fff',
+                            bodyColor: '#3b82f6',
+                            borderColor: 'rgba(59, 130, 246, 0.3)',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#6b7280', font: { family: 'JetBrains Mono' } } },
+                        x: { display: false }
+                    },
+                    interaction: { mode: 'nearest', axis: 'x', intersect: false }
+                }
+            });
+        }
+
+        function updateChart(curveData) {
+            if (!pnlChart) initChart();
+            if (!curveData || curveData.length === 0) return;
+            pnlChart.data.labels = curveData.map(d => new Date(d[0]).toLocaleTimeString());
+            pnlChart.data.datasets[0].data = curveData.map(d => d[1]);
+            pnlChart.update();
+        }
+
         function formatCurrency(val) {
             return new Intl.NumberFormat('en-IN', {
-                style: 'currency',
-                currency: 'INR',
-                maximumFractionDigits: 2
+                style: 'currency', currency: 'INR', maximumFractionDigits: 2
             }).format(val);
         }
 
-        async function updateDashboard() {
+        // --- SETTINGS SYNC ---
+        async function fetchSettings() {
             try {
-                // Fetch basic stats
+                const res = await fetch('/api/settings');
+                const conf = await res.json();
+
+                // Strategy Block
+                const stratHTML = `
+                    <div class="flex justify-between border-b border-gray-800 pb-2"><span>AI Confidence Threshold</span><span class="font-mono text-white">${conf.AI_THRESHOLD || '--'}</span></div>
+                    <div class="flex justify-between border-b border-gray-800 pb-2"><span>Base Target (%)</span><span class="font-mono text-green-400">${((conf.BASE_TARGET_PCT || 0) * 100).toFixed(2)}%</span></div>
+                    <div class="flex justify-between border-b border-gray-800 pb-2"><span>Use Beta Neutralization</span><span class="font-mono text-white">${conf.USE_BETA}</span></div>
+                    <div class="flex justify-between border-b border-gray-800 pb-2"><span>Max Hold Bars</span><span class="font-mono text-white">${conf.MAX_HOLD_BARS}</span></div>
+                `;
+                document.getElementById('settings-strategy').innerHTML = stratHTML;
+
+                // Risk Block
+                const riskHTML = `
+                    <div class="flex justify-between border-b border-gray-800 pb-2"><span>Stop Loss (%)</span><span class="font-mono text-red-400">${conf.STOP_LOSS_PCT}%</span></div>
+                    <div class="flex justify-between border-b border-gray-800 pb-2"><span>Max Daily Loss</span><span class="font-mono text-red-400">₹${conf.MAX_DAILY_LOSS}</span></div>
+                    <div class="flex justify-between border-b border-gray-800 pb-2"><span>Initial Capital</span><span class="font-mono text-white">₹${conf.INITIAL_CAPITAL}</span></div>
+                    <div class="flex justify-between border-b border-gray-800 pb-2"><span>Max Concurrent Trades</span><span class="font-mono text-white">${conf.MAX_CONCURRENT_TRADES}</span></div>
+                `;
+                document.getElementById('settings-risk').innerHTML = riskHTML;
+
+            } catch (e) { console.error("Settings sync failed", e); }
+        }
+
+        // --- DATA REFRESH ---
+        async function refreshData() {
+            try {
+                // Fetch Stats
                 const statsResponse = await fetch('/api/stats');
                 const stats = await statsResponse.json();
 
-                // 1. Update Header Stats
+                // Hydrate DOM
                 const sPnl = document.getElementById('session-pnl');
                 sPnl.textContent = formatCurrency(stats.daily_profit);
-                sPnl.className = `stat-value ${stats.daily_profit >= 0 ? 'value-up' : 'value-down'}`;
+                sPnl.className = `text-2xl font-bold mb-2 ${stats.daily_profit >= 0 ? 'text-green-400 glow-success' : 'text-red-400 glow-danger'}`;
 
-                const tPnl = document.getElementById('total-pnl');
-                tPnl.textContent = formatCurrency(stats.total_profit);
-                tPnl.className = `stat-value ${stats.total_profit >= 0 ? 'value-up' : 'value-down'}`;
+                const roiEl = document.getElementById('roi-pct');
+                roiEl.textContent = stats.roi_pct.toFixed(2) + '%';
+                roiEl.className = `text-2xl font-bold mb-2 ${stats.roi_pct >= 0 ? 'text-green-400 glow-success' : 'text-red-400 glow-danger'}`;
 
-                const activeCount = Object.keys(stats.active_positions).length;
-                document.getElementById('slot-efficiency').textContent = `${activeCount} / 20`;
+                document.getElementById('total-pnl').textContent = formatCurrency(stats.total_profit);
 
-                // 2. Update Live Trade Table
+                document.getElementById('daily-win-rate').textContent = stats.daily_win_rate.toFixed(1) + '%';
+                document.getElementById('daily-trades').textContent = stats.daily_trades;
+                document.getElementById('total-win-rate').textContent = stats.total_win_rate.toFixed(1) + '%';
+                document.getElementById('avg-duration').textContent = stats.avg_duration + 'm';
+                document.getElementById('active-slots').textContent = `${Object.keys(stats.active_positions).length}/20`;
+
+                // Update Chart
+                if (stats.pnl_curve) updateChart(stats.pnl_curve);
+
+                // Update Logs (Fetch Once, distribute to tables)
+                const logRes = await fetch('/api/logs');
+                const logs = await logRes.json();
+
+                // 1. Dashboard: Recent Executions (First 8)
                 const liveBody = document.getElementById('live-trades-body');
                 liveBody.innerHTML = '';
-                stats.trades.slice(-8).reverse().forEach(t => {
+                logs.slice().reverse().slice(0, 8).forEach(t => {
                     const row = document.createElement('tr');
-                    row.className = 'trade-row';
+                    const isBuy = t.side === 'BUY';
                     row.innerHTML = `
-                        <td>${t.timestamp}</td>
-                        <td class="ticker-name">${t.ticker}</td>
-                        <td><span class="badge ${t.type === 'buy' ? 'badge-buy' : 'badge-sell'}">${t.type}</span></td>
-                        <td class="price-mono">₹${t.price.toFixed(2)}</td>
-                        <td>${t.quantity}</td>
-                        <td class="${t.pnl > 0 ? 'value-up' : (t.pnl < 0 ? 'value-down' : '')}">
-                            ${t.pnl != 0 ? formatCurrency(t.pnl) : '—'}
-                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-gray-400">${t.timestamp || t.time || '--'}</td>
+                        <td class="px-4 py-3 font-semibold text-blue-400">${t.ticker}</td>
+                        <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold ${isBuy ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}">${t.side}</span></td>
+                        <td class="px-4 py-3 font-mono text-xs">₹${t.price.toFixed(2)}</td>
+                        <td class="px-4 py-3 font-mono text-xs ${t.pnl > 0 ? 'text-green-400' : (t.pnl < 0 ? 'text-red-400' : 'text-gray-500')}">${t.side === 'SELL' ? formatCurrency(t.pnl) : '-'}</td>
                     `;
                     liveBody.appendChild(row);
                 });
 
-                // 3. Update Positions
-                const posContainer = document.getElementById('positions-container');
-                posContainer.innerHTML = '';
-                Object.keys(stats.active_positions).forEach(ticker => {
-                    const pos = stats.active_positions[ticker];
-                    const div = document.createElement('div');
-                    div.className = 'position-item';
-                    div.innerHTML = `
-                        <div class="position-top">
-                            <div class="position-info">
-                                <span class="ticker-name">${ticker}</span>
-                                <span>Entry: ${pos.entry_time}</span>
-                            </div>
-                            <div class="position-pnl">₹${pos.entry_price.toFixed(2)}</div>
-                        </div>
-                        <div style="font-size: 0.75rem; color: var(--text-secondary); display: flex; justify-content: space-between;">
-                            <span>Qty: ${pos.quantity}</span>
-                            <span>Target: Aggressive</span>
-                        </div>
+                // 2. Dashboard: Ledger Preview (Last 10)
+                const previewBody = document.getElementById('ledger-preview-body');
+                previewBody.innerHTML = '';
+                logs.slice().reverse().slice(0, 10).forEach(log => {
+                    const row = document.createElement('tr');
+                    row.className = "hover:bg-gray-800/30 transition-colors";
+                    row.innerHTML = `
+                         <td class="px-4 py-2 font-medium text-white">${log.ticker}</td>
+                        <td class="px-4 py-2"><span class="text-[10px] font-bold ${log.side === 'BUY' ? 'text-green-500' : 'text-red-500'}">${log.side}</span></td>
+                        <td class="px-4 py-2 text-right font-mono ${log.pnl > 0 ? 'text-green-400' : (log.pnl < 0 ? 'text-red-400' : 'text-gray-500')}">${log.side === 'SELL' ? formatCurrency(log.pnl) : '—'}</td>
                     `;
-                    posContainer.appendChild(div);
+                    previewBody.appendChild(row);
                 });
 
-                // 4. Fetch Master CSV Logs
-                const logsResponse = await fetch('/api/logs');
-                const logs = await logsResponse.json();
-                const masterBody = document.getElementById('master-log-body');
-                masterBody.innerHTML = '';
-                
-                if (logs && Array.isArray(logs)) {
-                    logs.slice().reverse().forEach(log => {
-                        const row = document.createElement('tr');
-                        row.style.borderBottom = "1px solid var(--glass-border)";
-                        row.innerHTML = `
-                            <td style="padding: 0.75rem;">${log.ticker}</td>
-                            <td><span class="badge ${log.side === 'BUY' ? 'badge-buy' : 'badge-sell'}">${log.side}</span></td>
-                            <td class="${log.pnl > 0 ? 'value-up' : (log.pnl < 0 ? 'value-down' : '')}">
-                                ${log.side === 'SELL' ? formatCurrency(log.pnl) : '—'}
-                            </td>
-                            <td style="font-size: 0.8rem;">${log.charges ? '₹' + log.charges.toFixed(2) : '—'}</td>
-                            <td class="price-mono" style="font-size: 0.8rem;">${log.breakeven ? log.breakeven.toFixed(2) + ' pts' : '—'}</td>
-                            <td style="font-size: 0.75rem; color: var(--text-secondary)">${log.reason || '—'}</td>
+                // 3. Full Logs View (All)
+                const fullLogBody = document.getElementById('full-log-body');
+                fullLogBody.innerHTML = '';
+                logs.slice().reverse().forEach(log => {
+                    const row = document.createElement('tr');
+                    row.className = "hover:bg-gray-800/30 transition-colors border-b border-gray-800/50";
+                    row.innerHTML = `
+                        <td class="px-6 py-4 whitespace-nowrap text-gray-400">${log.timestamp || log.time || '--'}</td>
+                        <td class="px-6 py-4 font-bold text-white">${log.ticker}</td>
+                        <td class="px-6 py-4"><span class="text-xs font-bold px-2 py-1 rounded ${log.side === 'BUY' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">${log.side}</span></td>
+                        <td class="px-6 py-4 text-right font-mono">₹${log.price.toFixed(2)}</td>
+                        <td class="px-6 py-4 text-right font-mono ${log.pnl > 0 ? 'text-green-400' : (log.pnl < 0 ? 'text-red-400' : 'text-gray-500')}">${log.side === 'SELL' ? formatCurrency(log.pnl) : '—'}</td>
+                        <td class="px-6 py-4 text-right font-mono text-gray-500">${log.charges ? '₹' + log.charges.toFixed(2) : '-'}</td>
+                        <td class="px-6 py-4 text-gray-400 text-xs">${log.reason || ''}</td>
+                    `;
+                    fullLogBody.appendChild(row);
+                });
+
+                // Update Active Positions
+                const posList = document.getElementById('positions-list');
+                posList.innerHTML = '';
+                if (Object.keys(stats.active_positions).length === 0) {
+                    posList.innerHTML = '<div class="flex flex-col items-center justify-center h-48 text-gray-600"><svg class="w-8 h-8 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg><span class="text-xs">NO ACTIVE TRADES</span></div>';
+                } else {
+                    Object.keys(stats.active_positions).forEach(sym => {
+                        const pos = stats.active_positions[sym];
+                        const el = document.createElement('div');
+                        el.className = 'bg-gray-800/40 border border-gray-700/50 rounded-lg p-3 hover:bg-gray-800/60 transition';
+                        el.innerHTML = `
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="font-bold text-white text-sm">${sym}</span>
+                                <span class="font-mono text-xs text-gray-400">Qty: ${pos.quantity}</span>
+                            </div>
+                            <div class="flex justify-between items-center text-xs">
+                                <span class="bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20">ENTRY: ₹${pos.entry_price.toFixed(2)}</span>
+                                <span class="text-gray-500 font-mono">${pos.entry_time}</span>
+                            </div>
                         `;
-                        masterBody.appendChild(row);
+                        posList.appendChild(el);
                     });
                 }
 
-                document.getElementById('last-update').textContent = 'Last sync: ' + new Date().toLocaleTimeString();
+                document.getElementById('last-update').textContent = `SYNC: ${new Date().toLocaleTimeString()}`;
 
             } catch (err) {
-                console.error("Dashboard update failed:", err);
+                console.error("Dashboard Sync Error:", err);
             }
         }
 
-        setInterval(updateDashboard, 5000);
-        updateDashboard();
+        initChart();
+        fetchSettings(); // Initial Settings Load
+        setInterval(refreshData, 3000); // 3s refresh
+        refreshData();
     </script>
 </body>
+
 </html>
