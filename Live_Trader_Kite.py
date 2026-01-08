@@ -32,14 +32,14 @@ MODEL_PATH = "recovered_model.cbm"
 INITIAL_CAPITAL = 11700
 
 # ================== OPTIMAL PARAMETERS (FROM BACKTEST) ==================
-AI_THRESHOLD = 0.40
-BASE_TARGET_PCT = 0.003          # 0.3%
-STOP_LOSS_PCT = 0.5               # 0.5%
-SQUEEZE_THRESH = 0.00010
+AI_THRESHOLD = 0.39
+BASE_TARGET_PCT = 0.0028          # 0.28% (Hyper-Scalping)
+STOP_LOSS_PCT = 0.35              # 0.35% (Tight)
+SQUEEZE_THRESH = 0.00005
 SQUEEZE_WIDTH_PCT = 0.0000        # Exit at peak (or current price)
 MAX_HOLD_BARS = 12               # 3 Hours
 MAX_CONCURRENT_TRADES = 20
-CHECK_INTERVAL_LIVE = 60         # Check every ~1 minute
+CHECK_INTERVAL_LIVE = 30         # Check every ~1 minute
 USE_BETA = False                 # Neutralize Beta as per optimization
 
 MAX_DAILY_LOSS = -2000
@@ -404,8 +404,7 @@ def scan_and_trade():
                     print(f"⚠️ SQUEEZE: {ticker_raw} | Stalled at 6 bars. Exiting.")
             elif pos.bars_held >= MAX_HOLD_BARS:
                 exit_reason = "MAX_TIME"
-            elif pos.bars_held >= MAX_HOLD_BARS:
-                exit_reason = "MAX_TIME"
+
             elif now.hour >= 15 and now.minute >= 15:
                 exit_reason = "EOD"
 
