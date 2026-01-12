@@ -106,6 +106,11 @@ UNIQUE_SECTORS = ['Auto', 'Banking', 'Cables', 'Cement', 'Conglomerate', 'Divers
                   'Finance', 'Fintech', 'Gas', 'Housing Finance', 'IT', 'Infra', 'Jewellery', 'Logistics',
                   'Metals', 'Mining', 'Pharma', 'Power', 'Railway', 'Railway Finance', 'Retail', 'Tech', 'Telecom']
 
+base_features = [
+    'open', 'high', 'low', 'close', 'volume', 'rsi', 'macd', 'macdsignal', 'macdhist',
+    'adx', 'cci', 'atr', 'mfi', 'obv', 'willr', 'stoch_k', 'stoch_d', 'bb_upper', 'bb_lower', 'bb_mid'
+]
+
 # ================== INITIALIZATION ==================
 def auto_kite_login():
     print("Attempting Automated Kite Login (Headless)...")
@@ -160,33 +165,40 @@ def auto_kite_login():
         print(f"FAILED: Auto-login error: {e}")
         return None
 
-def initialize_kite():
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, "r") as f:
-            token = f.read().strip()
-    else:
-        token = auto_kite_login()
+def initialize_kite(retries=3):
+    global kite
+    for i in range(retries):
+        token = None
+        if os.path.exists(TOKEN_FILE):
+            with open(TOKEN_FILE, "r") as f:
+                token = f.read().strip()
+        
+        if not token:
+            token = auto_kite_login()
 
-    if not token:
-        print("FATAL: Could not acquire access token.")
-        exit(1)
+        if token:
+            k = KiteConnect(api_key=API_KEY)
+            k.set_access_token(token)
+            try:
+                profile = k.profile()
+                print(f"OK: Logged in as {profile['user_name']}")
+                return k
+            except Exception:
+                print(f"Token expired or invalid (Attempt {i+1}/{retries}). Attempting fresh login...")
+                token = auto_kite_login()
+                if token:
+                    k.set_access_token(token)
+                    try:
+                        k.profile()
+                        return k
+                    except Exception:
+                        pass
+        
+        print(f"Login attempt {i+1} failed. Retrying in 10s...")
+        time.sleep(10)
 
-    k = KiteConnect(api_key=API_KEY)
-    k.set_access_token(token)
-
-    try:
-        profile = k.profile()
-        print(f"OK: Logged in as {profile['user_name']}")
-        return k
-    except Exception:
-        print("Token expired or invalid. Attempting fresh login...")
-        new_token = auto_kite_login()
-        if new_token:
-            k.set_access_token(new_token)
-            return k
-        else:
-            print("FATAL: Re-login failed.")
-            exit(1)
+    print("FATAL: Could not acquire valid access token after retries.")
+    return None
 
 kite = initialize_kite()
 
@@ -405,11 +417,24 @@ def scan_and_trade():
             elif pos.bars_held >= MAX_HOLD_BARS:
                 exit_reason = "MAX_TIME"
 
-            elif now.hour >= 15 and now.minute >= 15:
+            elif now.hour >= 15 and now.minute >= 13:
                 exit_reason = "EOD"
 
             if exit_reason:
-                order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_SELL, ticker=ticker_raw, quantity=pos.quantity)
+                try:
+                    order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_SELL, ticker=ticker_raw, quantity=pos.quantity)
+                except Exception as e:
+                    if "Token" in str(e) or "403" in str(e):
+                        print("Session expired during trade. Re-initializing Kite...")
+                        kite = initialize_kite()
+                        if kite:
+                            order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_SELL, ticker=ticker_raw, quantity=pos.quantity)
+                        else:
+                            print(f"Failed to recover session. Skipping SELL for {ticker_raw}")
+                            continue
+                    else:
+                         raise e
+                
                 if order_id:
                     c_info = calculate_charges(pos.entry_price, exit_price, pos.quantity)
                     pnl = (exit_price - pos.entry_price) * pos.quantity - c_info['total']
@@ -454,7 +479,20 @@ def scan_and_trade():
 
             print(f"🚀 SIGNAL: {ticker_raw} | Conf: {prob:.1%} | Price: ₹{curr_p:.2f}")
 
-            order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_BUY, ticker=ticker_raw, quantity=qty)
+            try:
+                order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_BUY, ticker=ticker_raw, quantity=qty)
+            except Exception as e:
+                if "Token" in str(e) or "403" in str(e):
+                    print("Session expired during BUY. Re-initializing Kite...")
+                    kite = initialize_kite()
+                    if kite:
+                        order_id = place_order_with_retry(side=kite.TRANSACTION_TYPE_BUY, ticker=ticker_raw, quantity=qty)
+                    else:
+                        print(f"Failed to recover session. Skipping BUY for {ticker_raw}")
+                        continue
+                else:
+                    raise e
+
             if order_id:
                 target = curr_p * (1 + BASE_TARGET_PCT)
                 sl = curr_p * (1 - STOP_LOSS_PCT / 100.0)
@@ -483,7 +521,17 @@ if __name__ == "__main__":
             status = "HALTED" if IS_Halt else "RUNNING"
             print(f"[{now.strftime('%H:%M:%S')}] {status} | Trades: {len(active_positions)}/{MAX_CONCURRENT_TRADES} | Session PnL: ₹{SESSION_PNL:.2f}", end="\r")
             
+            if not kite:
+                print("Kite session missing. Attempting recovery...")
+                kite = initialize_kite()
+                if not kite:
+                    print("Recovery failed. Waiting for next interval...")
+                    time.sleep(60)
+                    continue
+
             scan_and_trade()
+
+
         except KeyboardInterrupt:
             print("\n👋 Shutdown requested...")
             break
